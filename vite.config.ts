@@ -14,4 +14,15 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'three': ['three'],
+          'react-vendor': ['react', 'react-dom'],
+          'ui-vendor': ['lucide-react'],
+        },
+      },
+    },
+  },
 })
