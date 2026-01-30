@@ -1,17 +1,31 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
 import * as THREE from 'three';
-import type { BoardNode } from '../game/types';
+import Stats from 'stats.js';
+import type { BoardNode, Player } from '../game/types';
 import { BOARD_SIZE, DEPTH } from '../game/constants';
 import { vertexShader, fragmentShader } from './shaders';
 import { getConstraintRect, mapUVToCell } from './layout';
 
+export interface Scene3DHandle {
+    zoomIn: () => void;
+    zoomOut: () => void;
+    resetView: () => void;
+}
+
 interface Scene3DProps {
     board: BoardNode;
     activeConstraint: number[];
+    currentPlayer: Player;
     onMove: (x: number, y: number) => void;
+    statsInstance: Stats;
 }
 
-export const Scene3D = ({ board, activeConstraint, onMove }: Scene3DProps) => {
+// HMR Persistence
+let persistedZoom = 0.9;
+let persistedPan = { x: 0, y: 0 };
+
+export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeConstraint, currentPlayer, onMove, statsInstance }, ref) => {
+    // ... (refs)
     const mountRef = useRef<HTMLDivElement>(null);
     const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
     const sceneRef = useRef<THREE.Scene | null>(null);
@@ -19,11 +33,41 @@ export const Scene3D = ({ board, activeConstraint, onMove }: Scene3DProps) => {
     const materialRef = useRef<THREE.ShaderMaterial | null>(null);
     const textureRef = useRef<THREE.DataTexture | null>(null);
     const isDragging = useRef(false);
+    const isHovering = useRef(true);
     const dragStartPos = useRef({ x: 0, y: 0 });
     const lastMousePosition = useRef({ x: 0, y: 0 });
-    const zoomLevel = useRef(1);
-    const panOffset = useRef({ x: 0, y: 0 });
+    const zoomLevel = useRef(persistedZoom);
+    const panOffset = useRef(persistedPan);
     const [cursorClass, setCursorClass] = useState('cursor-default');
+
+    // Smooth Transition State
+    const playerValRef = useRef(currentPlayer === 'X' ? 0 : 1);
+
+    // Expose Controls
+    useImperativeHandle(ref, () => ({
+        zoomIn: () => {
+            const newZoom = Math.min(zoomLevel.current * 1.2, 20);
+            zoomLevel.current = newZoom;
+            persistedZoom = newZoom;
+            updateCamera();
+        },
+        zoomOut: () => {
+            const newZoom = Math.max(zoomLevel.current / 1.2, 0.5);
+            zoomLevel.current = newZoom;
+            persistedZoom = newZoom;
+            updateCamera();
+        },
+        resetView: () => {
+            zoomLevel.current = 0.9;
+            panOffset.current = { x: 0, y: 0 };
+            persistedZoom = 0.9;
+            persistedPan = { x: 0, y: 0 };
+            updateCamera();
+        }
+    }));
+
+    const transitionRef = useRef({ start: 0, target: 0, startTime: 0 });
+
 
     // --- Board State to Texture ---
     const updateTexture = useCallback(() => {
@@ -139,29 +183,117 @@ export const Scene3D = ({ board, activeConstraint, onMove }: Scene3DProps) => {
         textureRef.current = texture;
 
         // Material
+        const initialPlayerVal = currentPlayer === 'X' ? 0 : 1;
+        const initialConstraint = getConstraintRect(activeConstraint);
         const material = new THREE.ShaderMaterial({
             vertexShader,
             fragmentShader,
             uniforms: {
                 uStateTexture: { value: texture },
                 uHover: { value: new THREE.Vector2(-1, -1) },
-                uConstraint: { value: new THREE.Vector4(0, 0, 1, 1) },
+                uConstraint: { value: new THREE.Vector4(initialConstraint.x, initialConstraint.y, initialConstraint.w, initialConstraint.h) },
+                uPlayer: { value: initialPlayerVal },
                 uTime: { value: 0 },
             },
         });
         materialRef.current = material;
+        playerValRef.current = initialPlayerVal; // Sync ref too
 
         // Geometry
         const geometry = new THREE.PlaneGeometry(2, 2);
         const mesh = new THREE.Mesh(geometry, material);
         scene.add(mesh);
-
-        // Loop
+        // Loop Logic
+        let lastTime = 0;
         let animationId: number;
-        const animate = (time: number) => {
-            material.uniforms.uTime.value = time * 0.001;
+        let lastInputTime = performance.now();
+
+        const handleInput = () => {
+            lastInputTime = performance.now();
+        };
+
+        const handleEnter = () => { isHovering.current = true; };
+        const handleLeave = () => { isHovering.current = false; };
+
+        window.addEventListener('pointermove', handleInput);
+        window.addEventListener('wheel', handleInput);
+        window.addEventListener('pointerdown', handleInput);
+        window.addEventListener('keydown', handleInput);
+        document.body.addEventListener('pointerenter', handleEnter);
+        document.body.addEventListener('pointerleave', handleLeave);
+
+        const renderFrame = (t: number) => {
+            material.uniforms.uTime.value = t * 0.001;
+
+            // Animate Player Color Transition
+            const { start: colorStart, target, startTime } = transitionRef.current;
+            const now = performance.now();
+            const duration = 250; // ms
+            let p = (now - startTime) / duration;
+            p = Math.max(0, Math.min(1, p));
+            // smoothstep ease
+            const ease = THREE.MathUtils.smoothstep(p, 0, 1);
+            const val = THREE.MathUtils.lerp(colorStart, target, ease);
+
+            playerValRef.current = val;
+            material.uniforms.uPlayer.value = val;
+
             renderer.render(scene, camera);
+        };
+
+        const animate = (time: number) => {
             animationId = requestAnimationFrame(animate);
+
+            // 1. Background / Inactive Tab Check
+            if (document.hidden) {
+                return;
+            }
+
+            // Limit to 10 FPS ONLY if Unfocused AND Not Hovering
+            if (!document.hasFocus() && !isHovering.current) {
+                const bgInterval = 100; // 10 FPS
+                const delta = time - lastTime;
+
+                if (delta > bgInterval) {
+                    lastTime = time - (delta % bgInterval);
+                    statsInstance.begin();
+                    renderFrame(time);
+                    statsInstance.end();
+                }
+                return;
+            }
+
+            // 2. Dragging (Highest Priority) - Uncapped VSync 
+            if (isDragging.current) {
+                statsInstance.begin();
+                renderFrame(time);
+                statsInstance.end();
+                lastTime = time;
+                return;
+            }
+
+            // 3. Dynamic FPS (Active vs Idle)
+            const isActive = (time - lastInputTime) < 2000; // Active for 2s after input
+
+            if (isActive) {
+                // Active: Uncapped (VSync Limit)
+                statsInstance.begin();
+                renderFrame(time);
+                statsInstance.end();
+                lastTime = time;
+            } else {
+                // Idle: Throttled to 30 FPS to save power
+                const targetFPS = 30;
+                const interval = 1000 / targetFPS;
+                const delta = time - lastTime;
+
+                if (delta > interval) {
+                    lastTime = time - (delta % interval);
+                    statsInstance.begin();
+                    renderFrame(time);
+                    statsInstance.end();
+                }
+            }
         };
         animationId = requestAnimationFrame(animate);
 
@@ -181,6 +313,13 @@ export const Scene3D = ({ board, activeConstraint, onMove }: Scene3DProps) => {
         return () => {
             cancelAnimationFrame(animationId);
             window.removeEventListener('resize', handleResize);
+            window.removeEventListener('pointermove', handleInput);
+            window.removeEventListener('wheel', handleInput);
+            window.removeEventListener('pointerdown', handleInput);
+            window.removeEventListener('keydown', handleInput);
+            document.body.removeEventListener('pointerenter', handleEnter);
+            document.body.removeEventListener('pointerleave', handleLeave);
+
             renderer.dispose();
             texture.dispose();
             material.dispose();
@@ -198,8 +337,16 @@ export const Scene3D = ({ board, activeConstraint, onMove }: Scene3DProps) => {
         if (materialRef.current) {
             const rect = getConstraintRect(activeConstraint);
             materialRef.current.uniforms.uConstraint.value.set(rect.x, rect.y, rect.w, rect.h);
+
+            const target = currentPlayer === 'X' ? 0 : 1;
+            // Start transition from CURRENT value (to handle mid-transition changes)
+            transitionRef.current = {
+                start: playerValRef.current,
+                target: target,
+                startTime: performance.now()
+            };
         }
-    }, [activeConstraint]);
+    }, [activeConstraint, currentPlayer]);
 
     const getUV = (e: React.MouseEvent | MouseEvent) => {
         if (!rendererRef.current) return { x: -1, y: -1 };
@@ -248,8 +395,9 @@ export const Scene3D = ({ board, activeConstraint, onMove }: Scene3DProps) => {
         if (e.deltaY < 0) newZoom *= factor;
         else newZoom /= factor;
 
-        newZoom = Math.min(Math.max(newZoom, 0.5), 50);
+        newZoom = Math.min(Math.max(newZoom, 0.5), 20);
         zoomLevel.current = newZoom;
+        persistedZoom = newZoom;
 
         // Calculate new Pan Offset to keep mouseWorldX at same NDC
         // mouseWorldX = ndcX * (aspect / newZoom) + newPanX
@@ -257,6 +405,7 @@ export const Scene3D = ({ board, activeConstraint, onMove }: Scene3DProps) => {
 
         panOffset.current.x = mouseWorldX - ndcX * (aspect / newZoom);
         panOffset.current.y = mouseWorldY - ndcY * (1.0 / newZoom);
+        persistedPan = { ...panOffset.current };
 
         updateCamera();
     };
@@ -296,6 +445,7 @@ export const Scene3D = ({ board, activeConstraint, onMove }: Scene3DProps) => {
 
                 panOffset.current.x -= (dx / w) * worldWidth;
                 panOffset.current.y += (dy / h) * worldHeight;
+                persistedPan = { ...panOffset.current };
 
                 updateCamera();
                 return;
@@ -380,4 +530,4 @@ export const Scene3D = ({ board, activeConstraint, onMove }: Scene3DProps) => {
             />
         </div>
     );
-};
+}); // Close forwardRef

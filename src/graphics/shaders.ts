@@ -13,12 +13,49 @@ export const fragmentShader = `
   uniform vec2 uHover;
   uniform vec4 uConstraint;
   uniform float uTime;
+  uniform float uPlayer; // 0=X (Red), 1=O (Blue/Cyan) - BUT wait. 
+  // User said: "border color... to dark red and light red depending on current turn"
+  // Assuming: Turn X -> Red Borders. Turn O -> Blue Borders?
+  // Or "depending on current turn" means it reflects the player whose turn it is.
+  // X is usually Reddish/Cyan? No O is Magenta/Cyan in this shader? 
+  // C_X = (0.2, 0.9, 1.0) -> Cyan
+  // C_O = (1.0, 0.2, 0.6) -> Magenta/Reddish
   
-  const vec3 C_BG = vec3(0.05, 0.07, 0.12);
+  // Existing:
+  // C_3X = (0.1, 0.25, 0.55) -> Dark Blue
+  // C_4X = (0.4, 0.6, 0.9) -> Light Blue
+  
+  // Proposed:
+  // If turn is O (Magenta), use Blue/Magenta themes? 
+  // If turn is X (Cyan), use Cyan/Red themes?
+  
+  // Let's assume User wants Red/Blue DUALITY.
+  // X = Red, O = Blue? Or vice versa?
+  // Let's make it:
+  // ONE state: Dark Blue / Light Blue (Existing)
+  // OTHER state: Dark Red / Light Red
+  
+  // C_3X_BLUE = vec3(0.1, 0.25, 0.55)
+  // C_4X_BLUE = vec3(0.4, 0.6, 0.9)
+  
+  // C_3X_RED = vec3(0.55, 0.1, 0.1)
+  // C_4X_RED = vec3(0.9, 0.4, 0.4)
+  
+  const vec3 C_BG_BLUE = vec3(0.05, 0.07, 0.12);
+  const vec3 C_BG_RED = vec3(0.12, 0.05, 0.05);
+
   const vec3 C_1X = vec3(0.3, 0.3, 0.3);
   const vec3 C_2X = vec3(0.5, 0.5, 0.5);
-  const vec3 C_3X = vec3(0.1, 0.25, 0.55);
-  const vec3 C_4X = vec3(0.4, 0.6, 0.9);
+  
+  // Dynamic defs handled in main or ternary here? GLSL ES 1.0? 
+  // Better to use mix in main.
+  
+  const vec3 C_3X_BLUE = vec3(0.1, 0.25, 0.55);
+  const vec3 C_4X_BLUE = vec3(0.4, 0.6, 0.9);
+  
+  const vec3 C_3X_RED = vec3(0.55, 0.1, 0.15);
+  const vec3 C_4X_RED = vec3(0.9, 0.4, 0.4);
+
   const vec3 C_5X = vec3(1.0, 1.0, 1.0);
   const vec3 C_X = vec3(0.2, 0.9, 1.0); 
   const vec3 C_O = vec3(1.0, 0.2, 0.6); 
@@ -116,7 +153,7 @@ export const fragmentShader = `
         globalIdx += cellXY * multiplier;
     }
 
-    vec3 color = C_BG;
+    vec3 color = mix(C_BG_BLUE, C_BG_RED, uPlayer);
     
     if (inside) {
         vec2 idx = globalIdx;
@@ -146,10 +183,13 @@ export const fragmentShader = `
         }
         
         // 3. Borders
+        vec3 c3 = mix(C_3X_BLUE, C_3X_RED, uPlayer); 
+        vec3 c4 = mix(C_4X_BLUE, C_4X_RED, uPlayer);
+        
         color = mix(color, C_1X, borderMasks[3]);
         color = mix(color, C_2X, borderMasks[2]);
-        color = mix(color, C_3X, borderMasks[1]);
-        color = mix(color, C_4X, borderMasks[0]);
+        color = mix(color, c3, borderMasks[1]);
+        color = mix(color, c4, borderMasks[0]);
         
 
 
@@ -176,8 +216,8 @@ export const fragmentShader = `
             }
             // Leaf is at bottom. Layers above it are G, B, A.
             float leafDepth = wA + wB + wG; 
-            // Opacity: 1.0 -> 0.9 -> 0.8 -> 0.7
-            float opacity = 1.0 - 0.1 * leafDepth;
+            // Opacity: 1.0 -> 0.8 -> 0.6 -> 0.4
+            float opacity = 1.0 - 0.2 * leafDepth;
             color = mix(color, symColor, drawStroke(dist, 0.3, localPx) * safeArea * opacity);
         }
         

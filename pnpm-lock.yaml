@@ -39,6 +39,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.10)
+      '@types/stats.js':
+        specifier: ^0.17.4
+        version: 0.17.4
       '@types/three':
         specifier: ^0.182.0
         version: 0.182.0
@@ -63,6 +66,9 @@ importers:
       globals:
         specifier: ^17.2.0
         version: 17.2.0
+      stats.js:
+        specifier: ^0.17.0
+        version: 0.17.0
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
@@ -1320,6 +1326,9 @@ packages:
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
+
+  stats.js@0.17.0:
+    resolution: {integrity: sha512-hNKz8phvYLPEcRkeG1rsGmV5ChMjKDAWU7/OJJdDErPBNChQXxCo3WZurGpnWc6gZhAzEPFad1aVgyOANH1sMw==}
 
   strip-json-comments@3.1.1:
     resolution: {integrity: sha512-6fPc+R4ihwqP6N/aIv2f1gMH8lOVtWQHoqC4yK6oSDVVocumAsfCqjkXnqiYMhmMwS/mEHLp7Vehlt3ql6lEig==}
@@ -2616,6 +2625,8 @@ snapshots:
   shebang-regex@3.0.0: {}
 
   source-map-js@1.2.1: {}
+
+  stats.js@0.17.0: {}
 
   strip-json-comments@3.1.1: {}
 
