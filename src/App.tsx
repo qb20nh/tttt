@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import Stats from 'stats.js';
 import { useGameState } from './game/engine';
 import { Scene3D, type Scene3DHandle } from './graphics/Scene3D';
@@ -11,29 +11,30 @@ import './index.css';
 
 function App() {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [hasSavedGame, setHasSavedGame] = useState(false);
+  // Load saved state lazily
+  const [savedGame] = useState(() => loadGameState());
+  const [hasSavedGame, setHasSavedGame] = useState(!!savedGame);
   const [showMenuConfirm, setShowMenuConfirm] = useState(false);
+  const [depth, setDepth] = useState(savedGame?.depth || 4);
   // Persistent stats instance
-  const statsRef = useRef<Stats | null>(null);
+  const [stats] = useState(() => {
+    const s = new Stats();
+    s.showPanel(0);
+    return s;
+  });
 
-  if (!statsRef.current) {
-    statsRef.current = new Stats();
-    statsRef.current.showPanel(0);
-  }
-
-  const { board, currentPlayer, activeConstraint, winner, handleMove, resetGame, isAiThinking } = useGameState();
+  const { board, currentPlayer, activeConstraint, winner, handleMove, resetGame, isAiThinking } = useGameState(depth);
   const sceneRef = useRef<Scene3DHandle>(null);
 
-  // Check for saved game on mount
-  useEffect(() => {
-    const saved = loadGameState();
-    if (saved) {
-      setHasSavedGame(true);
-    }
-  }, []);
 
-  const handleStartGame = (mode: GameMode) => {
-    resetGame(mode);
+
+  const handleStartGame = (mode: GameMode, selectedDepth: number) => {
+    setDepth(selectedDepth);
+    // We need to wait for depth to update? No, pass it explicitly if possible or rely on state update.
+    // However, resetGame is from useGameState which depends on 'depth'.
+    // If we call setDepth, the component re-renders, and useGameState re-runs? 
+    // Actually useGameState hooks might need to react to depth change.
+    resetGame(mode, selectedDepth);
     setIsPlaying(true);
     setHasSavedGame(true);
   };
@@ -64,8 +65,10 @@ function App() {
             board={board}
             activeConstraint={activeConstraint}
             currentPlayer={currentPlayer}
+            winner={winner}
             onMove={handleMove}
-            statsInstance={statsRef.current!}
+            statsInstance={stats}
+            depth={depth}
           />
 
           <GameOverlay
@@ -77,7 +80,7 @@ function App() {
             onResetView={() => sceneRef.current?.resetView()}
             onMainMenu={() => setShowMenuConfirm(true)}
             isAiThinking={isAiThinking}
-            statsInstance={statsRef.current!}
+            statsInstance={stats}
           />
 
 

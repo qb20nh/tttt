@@ -1,14 +1,21 @@
-
-import { Users, Bot, MonitorPlay } from 'lucide-react';
+import { Users, Bot, MonitorPlay, Layers } from 'lucide-react';
 import type { GameMode } from '../game/types';
+import { useState } from 'react';
+import { DEFAULT_DEPTH } from '../game/constants';
 
 interface HomeScreenProps {
-    onStartGame: (mode: GameMode) => void;
+    onStartGame: (mode: GameMode, depth: number) => void;
     hasSavedGame: boolean;
     onResumeGame: () => void;
 }
 
 export const HomeScreen = ({ onStartGame, hasSavedGame, onResumeGame }: HomeScreenProps) => {
+    const [selectedDepth, setSelectedDepth] = useState(DEFAULT_DEPTH);
+
+    // Filter available depths (2, 3, 4)
+    // We can assume MAX_DEPTH is 4.
+    const depths = [2, 3, 4];
+
     return (
         <div className="absolute inset-0 z-50 bg-slate-950 flex flex-col items-center justify-center p-4 animate-in fade-in duration-500">
             <div className="max-w-4xl w-full space-y-12 text-center">
@@ -23,11 +30,35 @@ export const HomeScreen = ({ onStartGame, hasSavedGame, onResumeGame }: HomeScre
                     </p>
                 </div>
 
+                {/* Depth Selector */}
+                <div className="flex flex-col items-center space-y-4">
+                    <div className="flex items-center space-x-2 text-slate-400">
+                        <Layers className="w-5 h-5" />
+                        <span className="uppercase tracking-widest text-sm font-bold">Recursion Depth</span>
+                    </div>
+                    <div className="flex space-x-4 bg-slate-900/50 p-2 rounded-xl border border-slate-800">
+                        {depths.map(depth => (
+                            <button
+                                key={depth}
+                                onClick={() => setSelectedDepth(depth)}
+                                className={`
+                                    w-12 h-12 rounded-lg font-bold text-lg transition-all duration-200 cursor-pointer
+                                    ${selectedDepth === depth
+                                        ? 'bg-cyan-500 text-black shadow-[0_0_15px_rgba(34,211,238,0.4)] scale-110'
+                                        : 'bg-slate-800 text-slate-500 hover:bg-slate-700 hover:text-slate-300'}
+                                `}
+                            >
+                                {depth}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
                 {/* Game Modes */}
                 <div className="grid md:grid-cols-3 gap-6">
                     {/* Hotseat */}
                     <button
-                        onClick={() => onStartGame('PvP')}
+                        onClick={() => onStartGame('PvP', selectedDepth)}
                         className="group relative w-full h-full focus:outline-none cursor-pointer"
                     >
                         <div className="bg-slate-900/50 border border-slate-800 p-8 pt-12 rounded-2xl transition-all duration-300 group-hover:-translate-y-1 group-hover:bg-slate-800 group-hover:border-cyan-500/50 group-hover:shadow-[0_0_30px_rgba(34,211,238,0.1)] h-full flex flex-col items-center justify-start">
@@ -40,7 +71,7 @@ export const HomeScreen = ({ onStartGame, hasSavedGame, onResumeGame }: HomeScre
 
                     {/* PvAI */}
                     <button
-                        onClick={() => onStartGame('PvAI')}
+                        onClick={() => onStartGame('PvAI', selectedDepth)}
                         className="group relative w-full h-full focus:outline-none cursor-pointer"
                     >
                         <div className="bg-slate-900/50 border border-slate-800 p-8 pt-12 rounded-2xl transition-all duration-300 group-hover:-translate-y-1 group-hover:bg-slate-800 group-hover:border-rose-500/50 group-hover:shadow-[0_0_30px_rgba(244,63,94,0.1)] h-full flex flex-col items-center justify-start">
@@ -53,7 +84,7 @@ export const HomeScreen = ({ onStartGame, hasSavedGame, onResumeGame }: HomeScre
 
                     {/* Spectate */}
                     <button
-                        onClick={() => onStartGame('AIvAI')}
+                        onClick={() => onStartGame('AIvAI', selectedDepth)}
                         className="group relative w-full h-full focus:outline-none cursor-pointer"
                     >
                         <div className="bg-slate-900/50 border border-slate-800 p-8 pt-12 rounded-2xl transition-all duration-300 group-hover:-translate-y-1 group-hover:bg-slate-800 group-hover:border-purple-500/50 group-hover:shadow-[0_0_30px_rgba(168,85,247,0.1)] h-full flex flex-col items-center justify-start">
@@ -80,7 +111,7 @@ export const HomeScreen = ({ onStartGame, hasSavedGame, onResumeGame }: HomeScre
 
             {/* Footer */}
             <div className="absolute bottom-8 text-slate-600 text-sm">
-                v1.1 • Level 4 Recursion
+                v1.2 • Adjustable Recursion
             </div>
         </div>
     );

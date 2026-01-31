@@ -84,9 +84,10 @@ function mix(h: bigint): bigint {
     return h;
 }
 
-const PLAYER_KEYS = {
+const PLAYER_KEYS: Record<string, bigint> = {
     'X': 0x1234567890ABCDEFn,
-    'O': 0xFEDCBA0987654321n
+    'O': 0xFEDCBA0987654321n,
+    'Draw': 0xAAAA5555AAAA5555n
 };
 
 export const computeHash = (board: BoardNode, turn: Player, constraint: number[]): bigint => {

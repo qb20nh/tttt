@@ -1,6 +1,6 @@
 // Game primitives
 export type Player = 'X' | 'O';
-export type Winner = Player | null;
+export type Winner = Player | 'Draw' | null;
 export type GameMode = 'PvP' | 'PvAI' | 'AIvAI';
 
 // The fractal board structure

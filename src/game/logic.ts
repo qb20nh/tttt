@@ -31,3 +31,33 @@ export const isFull = (board: BoardNode): boolean => {
         (child.winner !== null) || (child.value !== null) || isFull(child)
     );
 };
+
+// Check if a player CAN possibly win this board
+export const canWin = (board: BoardNode, player: Player): boolean => {
+    // 1. Already won by us -> True
+    if (board.winner === player) return true;
+    // 2. Won by opponent or Drawn -> False
+    if (board.winner && board.winner !== player) return false;
+
+    // 3. Leaf Node
+    if (!board.children) {
+        // If empty (value=null), we CAN win it.
+        // If taken by us, we CAN use it (already done).
+        // If taken by opponent, we CAN'T.
+        return board.value === null || board.value === player;
+    }
+
+    // 4. Recursive Check
+    // We need AT LEAST ONE strictly valid winning pattern.
+    // A pattern is valid if ALL 3 cells in it are 'winnable'.
+    for (const pattern of WIN_PATTERNS) {
+        const [a, b, c] = pattern;
+        if (canWin(board.children[a], player) &&
+            canWin(board.children[b], player) &&
+            canWin(board.children[c], player)) {
+            return true;
+        }
+    }
+
+    return false;
+};

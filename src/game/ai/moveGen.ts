@@ -1,7 +1,7 @@
 import type { BoardNode } from '../types';
 import { isFull } from '../logic';
 
-export function generateMoves(board: BoardNode, activeConstraint: number[]): number[][] {
+export function generateMoves(board: BoardNode, activeConstraint: number[], boardDepth: number): number[][] {
     const moves: number[][] = [];
 
     // 1. Find the target node based on constraint
@@ -31,12 +31,12 @@ export function generateMoves(board: BoardNode, activeConstraint: number[]): num
         // Search globally (depth 4)
         // This is expensive? 6561 cells.
         // We need to find all valid leaves.
-        collectMoves(board, [], moves, 4);
+        collectMoves(board, [], moves, boardDepth);
     } else {
         // Search within target
         // We need to complete the path.
         // If constraint is length 2 ([p0, p1]), we need [p2, p3].
-        collectMoves(target, activeConstraint, moves, 4 - activeConstraint.length);
+        collectMoves(target, activeConstraint, moves, boardDepth - activeConstraint.length);
     }
 
     return moves;

@@ -28,7 +28,15 @@ export const GameOverlay = ({
     statsInstance
 }: GameOverlayProps) => {
     const [showResetConfirm, setShowResetConfirm] = useState(false);
+    const [dismissed, setDismissed] = useState(false);
     const statsContainerRef = useRef<HTMLDivElement>(null);
+
+    // Reset dismissed state when winner changes
+    useEffect(() => {
+        if (winner) {
+            setDismissed(false);
+        }
+    }, [winner]);
 
     // Mount Stats.js
     useEffect(() => {
@@ -36,6 +44,7 @@ export const GameOverlay = ({
             const dom = statsInstance.dom;
 
             // Override default fixed positioning and layout
+            // eslint-disable-next-line
             dom.style.position = 'relative';
             dom.style.top = 'auto';
             dom.style.left = 'auto';
@@ -158,14 +167,35 @@ export const GameOverlay = ({
             />
 
             {/* Winner Overlay */}
-            {winner && (
+            {winner && !dismissed && (
                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
-                    <div className="bg-slate-900 border border-slate-700 p-8 rounded-2xl shadow-2xl text-center max-w-sm mx-4 transform transition-all scale-100">
+                    <div className="relative bg-slate-900 border border-slate-700 p-8 rounded-2xl shadow-2xl text-center max-w-sm mx-4 transform transition-all scale-100">
+                        {/* Dismiss Button */}
+                        <button
+                            onClick={() => setDismissed(true)}
+                            className="absolute top-2 right-2 p-2 text-slate-500 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                            title="Dismiss"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
                         <h2 className="text-slate-400 text-sm font-bold uppercase tracking-widest mb-4">Game Over</h2>
-                        <div className={`text-8xl font-black mb-6 ${winner === 'X' ? 'text-cyan-400' : 'text-rose-500'} drop-shadow-[0_0_30px_rgba(255,255,255,0.2)]`}>
-                            {winner}
-                        </div>
-                        <div className="text-white text-2xl font-bold mb-8">Wins the Game!</div>
+
+                        {winner === 'Draw' ? (
+                            <>
+                                <div className="text-6xl font-black mb-6 text-slate-200 drop-shadow-[0_0_30px_rgba(255,255,255,0.2)]">
+                                    DRAW
+                                </div>
+                                <div className="text-white text-xl font-bold mb-8">Stalemate Reached</div>
+                            </>
+                        ) : (
+                            <>
+                                <div className={`text-8xl font-black mb-6 ${winner === 'X' ? 'text-cyan-400' : 'text-rose-500'} drop-shadow-[0_0_30px_rgba(255,255,255,0.2)]`}>
+                                    {winner}
+                                </div>
+                                <div className="text-white text-2xl font-bold mb-8">Wins the Game!</div>
+                            </>
+                        )}
                         <button
                             onClick={onReset}
                             className="group flex items-center justify-center gap-2 w-full bg-white text-slate-900 px-6 py-4 rounded-xl font-bold hover:bg-slate-200 transition-all active:scale-95 cursor-pointer"

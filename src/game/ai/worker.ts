@@ -10,6 +10,7 @@ interface WorkerMessage {
     config: {
         maxTime: number;
         maxDepth: number;
+        boardDepth: number;
     };
 }
 

@@ -1,5 +1,5 @@
 import type { BoardNode, Player, Winner, GameMode } from './types';
-import { DEPTH } from './constants';
+import { DEFAULT_DEPTH } from './constants';
 import { checkWin } from './logic';
 
 const KEY = 'ttt_fractal_state';
@@ -10,12 +10,14 @@ interface SavedState {
     activeConstraint: number[];
     winner: Winner;
     gameMode: GameMode;
+    depth: number;
 }
 
 // 1. Flatten Board
 function flattenBoard(node: BoardNode): (Player | null)[] {
     if (!node.children) {
-        return [node.value];
+        const v = node.value;
+        return [v === 'Draw' ? null : v];
     }
     return node.children.flatMap(flattenBoard);
 }
@@ -118,7 +120,7 @@ function reconstructBoard(flat: (Player | null)[], depth: number): { node: Board
     // Since we only stored leaves, we need to re-calculate winners/values up the tree
     // Ideally the engine does this, but we need to restore state.
     // We can run a "revalidate" pass.
-    let node: BoardNode = {
+    const node: BoardNode = {
         winner: null,
         winPattern: -1,
         value: null,
@@ -152,6 +154,8 @@ export function saveGameState(state: SavedState) {
         // 0: Player (0=X, 1=O)
         // 1: Constraint Length
         // 2..N: Constraint indices
+        // Next: Depth (new)
+        // Next: Game Mode
         // Next: Board Data as raw string
 
         const header: number[] = [];
@@ -162,6 +166,9 @@ export function saveGameState(state: SavedState) {
         if (state.gameMode === 'PvP') modeByte = 0;
         else if (state.gameMode === 'AIvAI') modeByte = 2;
         header.push(modeByte);
+
+        // Depth
+        header.push(state.depth);
 
         header.push(state.activeConstraint.length);
         state.activeConstraint.forEach(c => header.push(c));
@@ -200,6 +207,34 @@ export function loadGameState(): SavedState | null {
         if (modeByte === 0) gameMode = 'PvP';
         else if (modeByte === 2) gameMode = 'AIvAI';
 
+        // Peek constraint logic or depths?
+        // Old format didn't have depth. How to distinguish?
+        // Old format: Player, Mode, ConstraintLen...
+        // New format: Player, Mode, Depth, ConstraintLen...
+        // We can check if the 3rd byte is likely a depth (2,3,4) vs constraint len (0,1,2,3,4).
+        // Ambiguous if constraint len matches depth.
+        // Better: We are breaking save compatibility slightly.
+        // Assuming we reset or user accepts invalidation.
+
+        let depth = DEFAULT_DEPTH;
+
+        // Heuristic: Check byte at ptr.
+        // const nextByte = data.charCodeAt(ptr);
+
+        // If nextByte is 2-4 and NOT followed by indices...
+        // Constraint indices are 0-8.
+        // If we interpret as Depth, then next byte is constraint length.
+        // If we interpret as Constraint Length, then next 'length' bytes are indices.
+
+        // Let's assume new format. If parsing fails, return null.
+        depth = data.charCodeAt(ptr++);
+        if (depth < 2 || depth > 4) {
+            // Probably old format or invalid.
+            // Fallback to inferring?
+            // Let's force reset for safety in this migration.
+            return null;
+        }
+
         const constraintLen = data.charCodeAt(ptr++);
         const activeConstraint: number[] = [];
         for (let i = 0; i < constraintLen; i++) {
@@ -216,12 +251,12 @@ export function loadGameState(): SavedState | null {
         // We need to know original compacted size? 
         // 9^4 cells = 6561. 
         // 4 cells per byte -> ceil(6561/4) = 1641 bytes.
-        const TOTAL_CELLS = Math.pow(9, DEPTH); // 6561
+        const TOTAL_CELLS = Math.pow(9, depth);
         const COMPACT_SIZE = Math.ceil(TOTAL_CELLS / 4);
 
         const compacted = uncompressRLE(bodyBytes, COMPACT_SIZE);
         const flat = uncompactBoard(compacted, TOTAL_CELLS);
-        const { node } = reconstructBoard(flat, DEPTH);
+        const { node } = reconstructBoard(flat, depth);
 
         // Re-verify winners from bottom up?
         // reconstructBoard already does checkWin recursively.
@@ -239,7 +274,8 @@ export function loadGameState(): SavedState | null {
             currentPlayer,
             activeConstraint,
             winner,
-            gameMode
+            gameMode,
+            depth
         };
     } catch (e) {
         console.error("Failed to load state", e);

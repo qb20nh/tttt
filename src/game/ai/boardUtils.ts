@@ -85,31 +85,32 @@ export function undoMove(board: BoardNode, undo: MoveUndo): void {
 }
 
 export function calculateNextConstraint(movePath: number[], winLevel: number): number[] {
-    // movePath is [p0, p1, p2, p3] (length 4)
-    // winLevel = 0 (no win), 1 (local), 2 (mid), 3 (macro), 4 (root)
+    // Generalized Logic:
+    // d = length, wonDepth = d - winLevel.
+    // context = path.slice(0, max(0, wonDepth - 2)) + [path[wonDepth - 1]]
 
-    // Logic:
-    // keepDepth = 2 - winLevel;
-    // nextC = fullMove.slice(0, keepDepth) + fullMove[3 - winLevel]
+    const d = movePath.length;
+    const wonDepth = d - winLevel;
 
-    const keepDepth = 2 - winLevel;
-    if (keepDepth >= 0) {
-        const nextC = movePath.slice(0, keepDepth);
-        nextC.push(movePath[3 - winLevel]);
-        return nextC;
-    }
-    return []; // If winLevel is 3 or 4, keepDepth is negative, so []?
-    // If we win a major board, we probably send player to a larger scope or anywhere?
-    // In engine.ts, if keepDepth < 0, nextC is empty.
+    if (wonDepth <= 0) return []; // Root won, everything won
+
+    const contextDepth = Math.max(0, wonDepth - 2);
+    const context = movePath.slice(0, contextDepth);
+    const targetIndex = movePath[wonDepth - 1];
+
+    return [...context, targetIndex];
 }
 
 export function isPlayable(board: BoardNode, constraint: number[]): boolean {
-    if (constraint.length === 0) return true;
+    if (board.winner) return false; // Root won check
 
     let node = board;
     for (const idx of constraint) {
         if (!node.children) return false;
         node = node.children[idx];
+        if (node.winner) return false; // Intermediate/Target node won
     }
-    return !node.winner && !isFull(node);
+
+    // Also check isFull on the target
+    return !isFull(node);
 }

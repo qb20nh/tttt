@@ -1,8 +1,8 @@
 import type { Rect } from '../game/types';
-import { BASE_GAP, OUTER_GAP } from '../game/constants';
+import { BASE_GAP, OUTER_GAP, DEFAULT_DEPTH } from '../game/constants';
 
 // --- Exact Visual Constraint Calculator ---
-export const getConstraintRect = (constraint: number[]): Rect => {
+export const getConstraintRect = (constraint: number[], depth: number = DEFAULT_DEPTH): Rect => {
     let x = 0.0;
     let y = 0.0;
     let w = 1.0;
@@ -22,7 +22,7 @@ export const getConstraintRect = (constraint: number[]): Rect => {
 
     for (let i = 0; i < constraint.length; i++) {
         const idx = constraint[i];
-        const d = 4 - i;
+        const d = depth - i;
 
         const globalGap = BASE_GAP * d;
         const gapUV = globalGap / gridSizeScale;
@@ -41,7 +41,11 @@ export const getConstraintRect = (constraint: number[]): Rect => {
         h = subSize;
     }
 
-    const gapLevel = 5 - constraint.length;
+    // Gap level for constraint border logic
+    // If constraint.length == 0, gapLevel = depth+1?
+    // In original code: gapLevel = 5 - constraint.length (where max depth=4)
+    // So gapLevel = (depth + 1) - constraint.length.
+    const gapLevel = (depth + 1) - constraint.length;
     const rawGap = BASE_GAP * gapLevel;
     const expansion = (rawGap / gridSizeScale) / 2.0;
 
@@ -54,7 +58,7 @@ export const getConstraintRect = (constraint: number[]): Rect => {
 };
 
 // --- Recursive Coordinate Math (JS) ---
-export const mapUVToCell = (uv: { x: number, y: number }): { valid: boolean, x: number, y: number } => {
+export const mapUVToCell = (uv: { x: number, y: number }, depth: number = DEFAULT_DEPTH): { valid: boolean, x: number, y: number } => {
     if (uv.x < OUTER_GAP || uv.x > 1.0 - OUTER_GAP ||
         uv.y < OUTER_GAP || uv.y > 1.0 - OUTER_GAP) {
         return { valid: false, x: -1, y: -1 };
@@ -67,8 +71,8 @@ export const mapUVToCell = (uv: { x: number, y: number }): { valid: boolean, x: 
     let idxY = 0;
     let currentScale = 1.0;
 
-    for (let i = 0; i < 4; i++) {
-        const d = 4 - i;
+    for (let i = 0; i < depth; i++) {
+        const d = depth - i;
         const globalGap = BASE_GAP * d;
         const effectiveGap = globalGap / (1.0 - 2.0 * OUTER_GAP);
         const gap = effectiveGap / currentScale;

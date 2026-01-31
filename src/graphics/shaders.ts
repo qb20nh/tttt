@@ -13,42 +13,15 @@ export const fragmentShader = `
   uniform vec2 uHover;
   uniform vec4 uConstraint;
   uniform float uTime;
-  uniform float uPlayer; // 0=X (Red), 1=O (Blue/Cyan) - BUT wait. 
-  // User said: "border color... to dark red and light red depending on current turn"
-  // Assuming: Turn X -> Red Borders. Turn O -> Blue Borders?
-  // Or "depending on current turn" means it reflects the player whose turn it is.
-  // X is usually Reddish/Cyan? No O is Magenta/Cyan in this shader? 
-  // C_X = (0.2, 0.9, 1.0) -> Cyan
-  // C_O = (1.0, 0.2, 0.6) -> Magenta/Reddish
-  
-  // Existing:
-  // C_3X = (0.1, 0.25, 0.55) -> Dark Blue
-  // C_4X = (0.4, 0.6, 0.9) -> Light Blue
-  
-  // Proposed:
-  // If turn is O (Magenta), use Blue/Magenta themes? 
-  // If turn is X (Cyan), use Cyan/Red themes?
-  
-  // Let's assume User wants Red/Blue DUALITY.
-  // X = Red, O = Blue? Or vice versa?
-  // Let's make it:
-  // ONE state: Dark Blue / Light Blue (Existing)
-  // OTHER state: Dark Red / Light Red
-  
-  // C_3X_BLUE = vec3(0.1, 0.25, 0.55)
-  // C_4X_BLUE = vec3(0.4, 0.6, 0.9)
-  
-  // C_3X_RED = vec3(0.55, 0.1, 0.1)
-  // C_4X_RED = vec3(0.9, 0.4, 0.4)
-  
+  uniform float uPlayer; 
+  uniform int uDepth; // New uniform
+
+  // Colors
   const vec3 C_BG_BLUE = vec3(0.05, 0.07, 0.12);
   const vec3 C_BG_RED = vec3(0.12, 0.05, 0.05);
 
   const vec3 C_1X = vec3(0.3, 0.3, 0.3);
   const vec3 C_2X = vec3(0.5, 0.5, 0.5);
-  
-  // Dynamic defs handled in main or ternary here? GLSL ES 1.0? 
-  // Better to use mix in main.
   
   const vec3 C_3X_BLUE = vec3(0.1, 0.25, 0.55);
   const vec3 C_4X_BLUE = vec3(0.4, 0.6, 0.9);
@@ -113,17 +86,32 @@ export const fragmentShader = `
 
     float globalPx = fwidth(gridUV.x);
     vec2 localUV = gridUV;
-    vec2 globalIdx = vec2(0.0); 
-    float currentScale = 1.0;
     
+    // We can assume max depth 4 for array sizing, but use uDepth for loops.
     vec2 uvLevels[4]; 
     float pxLevels[4];
     float borderMasks[4]; 
+    
+    // Initialize defaults
+    for(int i=0; i<4; i++) {
+        uvLevels[i] = vec2(0.0);
+        pxLevels[i] = 1.0;
+        borderMasks[i] = 0.0;
+    }
+
+    vec2 globalIdx = vec2(0.0); 
+    float currentScale = 1.0;
+    
     if (!inside) localUV = vec2(0.5); 
 
+    // Loop up to uDepth
     for (int i = 0; i < 4; i++) {
-        float level = 4.0 - float(i);
-        float effectiveGap = (BASE_GAP * level) / gridSize.x;
+        if (i >= uDepth) break;
+
+        // User Requirement: Border thickness 5 (outermost), 4, 3, ...
+        // i=0 is outermost divider (Largest).
+        float thickness = 5.0 - float(i); 
+        float effectiveGap = (BASE_GAP * thickness) / gridSize.x;
         float gap = effectiveGap / currentScale;
         float localPx = globalPx / currentScale;
         
@@ -149,7 +137,7 @@ export const fragmentShader = `
         
         localUV = (localUV - cellOffset) / size;
         currentScale *= size;
-        float multiplier = pow(3.0, 3.0 - float(i));
+        float multiplier = pow(3.0, float(uDepth) - 1.0 - float(i));
         globalIdx += cellXY * multiplier;
     }
 
@@ -157,10 +145,23 @@ export const fragmentShader = `
     
     if (inside) {
         vec2 idx = globalIdx;
-        float gridMask = max(max(borderMasks[0], borderMasks[1]), max(borderMasks[2], borderMasks[3]));
+        
+        // Calculate grid mask based on uDepth
+        float gridMask = 0.0;
+        for(int i=0; i<4; i++) {
+            if (i < uDepth) gridMask = max(gridMask, borderMasks[i]);
+        }
+        
         float safeArea = 1.0 - gridMask;
 
+        // Texture coordinate mapping
+        // The texture is always BOARD_SIZE x BOARD_SIZE (81x81).
+        // While we may only use a subset of it for smaller depths (e.g. 9x9 for depth 2),
+        // we map the global index (0..8) to the corresponding pixels (0..8) in the 81x81 image.
+        // Thus, we must divide by the full texture size (81.0), not the dynamic maxDim.
+        
         vec2 texUV = (idx + 0.5) / 81.0;
+        
         vec4 state = texture2D(uStateTexture, texUV);
         
         // 1. Tint
@@ -186,18 +187,39 @@ export const fragmentShader = `
         vec3 c3 = mix(C_3X_BLUE, C_3X_RED, uPlayer); 
         vec3 c4 = mix(C_4X_BLUE, C_4X_RED, uPlayer);
         
-        color = mix(color, C_1X, borderMasks[3]);
-        color = mix(color, C_2X, borderMasks[2]);
-        color = mix(color, c3, borderMasks[1]);
-        color = mix(color, c4, borderMasks[0]);
+        // Loop from Top-Down (i=0 is largest divider)
+        for(int i=0; i<4; i++) {
+            if (i >= uDepth) break;
+            
+            vec3 borderColor = C_1X; // Default (Deepest levels)
+            
+            // "outermost is white first largest inner border is light colored"
+            // "second largest is dark colored"
+            // "next light gray"
+            // "next dark gray"
+            
+            // i=0 (Top Divider): Light Colored (c4)
+            if (i == 0) borderColor = c4;
+            // i=1: Dark Colored (c3)
+            else if (i == 1) borderColor = c3;
+            // i=2: Light Gray (C_2X)
+            else if (i == 2) borderColor = C_2X;
+            // i=3 (or deeper): Dark Gray (C_1X)
+            else borderColor = C_1X;
+            
+            color = mix(color, borderColor, borderMasks[i]);
+        }
+
+        // Compute "Surface Depth" weights
+        // Corresponding to k=0,1,2 in loop below
+        // k maps to Depth Level from Bottom (1, 2, 3...)
+        // k=0 -> Level 1 (G).
+        // k=1 -> Level 2 (B).
+        // k=2 -> Level 3 (A).
         
-
-
-        // Compute "Surface Depth" - how many winners are stacking on top of this pixel
-        // L1 (G), L2 (B), L3 (A)
-        float wA = (state.a > 0.05) ? 1.0 : 0.0;
-        float wB = (state.b > 0.05) ? 1.0 : 0.0;
-        float wG = (state.g > 0.05) ? 1.0 : 0.0;
+        float wA = 0.0; if (uDepth >= 3) wA = (state.a > 0.05) ? 1.0 : 0.0;
+        float wB = 0.0; if (uDepth >= 2) wB = (state.b > 0.05) ? 1.0 : 0.0;
+        float wG = 0.0; if (uDepth >= 1) wG = (state.g > 0.05) ? 1.0 : 0.0;
 
         // 5. Leaf Symbols (state.r)
         if (state.r > 0.05) {
@@ -214,20 +236,44 @@ export const fragmentShader = `
             } else { 
                 dist = abs(length(p) - 0.6);
             }
-            // Leaf is at bottom. Layers above it are G, B, A.
-            float leafDepth = wA + wB + wG; 
-            // Opacity: 1.0 -> 0.8 -> 0.6 -> 0.4
+            
+            // Leaf Depth: how many won layers are above us?
+            float leafDepth = wG; // At least G covers R if won?
+            // Actually, if G is wont, it covers R. B covers G. A covers B.
+            // If uDepth=2. Layers: G(1), R(0).
+            // leafDepth = wG.
+            // If uDepth=3. Layers: B, G, R.
+            // leafDepth = wG + wB.
+            // If uDepth=4. Layers: A, B, G, R.
+            // leafDepth = wG + wB + wA.
+            
+            leafDepth = wG + wB + wA;
+            
             float opacity = 1.0 - 0.2 * leafDepth;
             color = mix(color, symColor, drawStroke(dist, 0.3, localPx) * safeArea * opacity);
         }
         
         // 6. Loop: Smallest (L1/G) -> Largest (L3/A)
-        // k=0: L1 (G). UV=uvLevels[3].
-        // k=1: L2 (B). UV=uvLevels[2].
-        // k=2: L3 (A). UV=uvLevels[1].
         for (int k = 0; k < 3; k++) {
+            // k represents Distance from Leaf Level (0).
+            // k=0 -> Level 1.
+            // k=1 -> Level 2.
+            
+            // If k >= uDepth - 1, stop (don't have that level).
+            // e.g. uDepth=2. Max level is 1. (Root).
+            // k=0 (Level 1). OK.
+            // k=1 (Level 2). Break.
+            if (k >= uDepth - 1) break; 
+            
             float val = (k==0) ? state.g : (k==1) ? state.b : state.a;
-            int levelIdx = 3 - k; // 3, 2, 1
+            
+            // levelIdx for 'uvLevels'. 
+            // uvLevels[i] corresponds to loop i = 0..(uDepth-1).
+            // i=0 is Root. i=uDepth-1 is Leaf Parent.
+            // We want Leaf Parent for k=0.
+            // So i = (uDepth - 1) - k.
+            
+            int levelIdx = (uDepth - 1) - k;
             
             if (val > 0.05) {
                 bool isX = val < 0.6;
@@ -239,14 +285,16 @@ export const fragmentShader = `
                 vec2 lUV = uvLevels[levelIdx];
                 float lPx = pxLevels[levelIdx];
                 
-                // Calculate Air Depth for this Level
-                // k=0 (L1/G): Covered by B, A.
-                // k=1 (L2/B): Covered by A.
-                // k=2 (L3/A): Covered by None.
+                // Air Depth
                 float airDepth = 0.0;
-                if (k == 0) airDepth = wA + wB;      // G covered by B and A
-                else if (k == 1) airDepth = wA;      // B covered by A
-                else airDepth = 0.0;                 // A covered by None
+                // Sum weights of levels > k+1 (Level k+1 is Depth k+1 from bottom?)
+                // Levels: R(0), G(1), B(2), A(3).
+                // k=0 (G). Covered by B(2) and A(3).
+                // k=1 (B). Covered by A(3).
+                // k=2 (A). Covered by None.
+                
+                if (k == 0) airDepth = wB + wA;
+                else if (k == 1) airDepth = wA;
                 
                 float lvlOpacity = 1.0 - 0.1 * airDepth;
 
@@ -254,19 +302,7 @@ export const fragmentShader = `
                 if (pattern >= 0 && pattern <= 7) {
                     vec4 coords = getWinLineCoords(pattern);
                     float dLine = sdSegment(lUV, coords.xy, coords.zw);
-                    // Match Leaf Thickness: Leaf is 0.3 relative to 1/9th of this cell.
-                    // So we want 0.3 / 3 = 0.1 relative to this cell.
                     float lineMask = drawStroke(dLine, 0.10, lPx);
-                    // Line is also subject to depth opacity, maybe slightly less base?
-                    // User said "singular 1x1 ... full opacity".
-                    // Implies we want crispness. Let's use lvlOpacity directly for now.
-                    // Or keep the line slightly fainter than symbol if desired, but user focused on "full opacity".
-                    // Let's stick to strict hierarchy: Line is "under" symbol, does it count as another layer?
-                    // User said "triple line in 3x3 has same ... as 1x1 symbol".
-                    // So Line Depth = Symbol Depth? Or Line Depth = Symbol Depth + 1?
-                    // "larger 3x3 symbol is drawn on top of ... triple line ... and has thicker stroke ... and higher opacity"
-                    // So Line is fainter than Symbol.
-                    // Let's apply an extra 0.6 factor to Line to separate it from Symbol, but scale with Air Depth.
                     color = mix(color, winColor, lineMask * lvlOpacity * 0.6);
                 }
                 
@@ -295,18 +331,17 @@ export const fragmentShader = `
         }
     }
     
-    // 8. Outer Border (Always on top of edges)
+    // 8. Outer Border
     float outerThick = OUTER_GAP;
     float distOuter = abs(sdBox(vUv - 0.5, vec2(0.5 - OUTER_GAP * 0.5)));
     float screenPx = fwidth(vUv.x);
     float outerMask = drawStroke(distOuter, OUTER_GAP, screenPx);
-    // Hide outer border if we are in the top-level view (glow covers it)
     if (uConstraint.z > 0.8) { 
         outerMask = 0.0;
     }
     color = mix(color, C_5X, outerMask);
 
-    // 4. Glow Border (Reordered to be on top)
+    // 4. Glow Border
     if (uConstraint.z > 0.0) {
        vec2 gridStart = vec2(OUTER_GAP);
        vec2 gridSize = vec2(1.0 - 2.0 * OUTER_GAP);
@@ -316,11 +351,15 @@ export const fragmentShader = `
        vec2 halfSize = uConstraint.zw * 0.5;
        float d = sdBox(gridUV - center, halfSize);
        float w = uConstraint.z;
-       float goldThick = BASE_GAP / gridSize.x; 
-       if (w > 0.8) goldThick *= 5.0;      
-       else if (w > 0.25) goldThick *= 4.0;
-       else if (w > 0.08) goldThick *= 3.0; 
-       else if (w > 0.02) goldThick *= 2.0; 
+       
+       // Continuous thickness
+       // Top Level (w=1.0) -> Multiplier 5.0
+       // Depth = -log3(w)
+       float depth = -log(w) / 1.09861228867; // 1.098... is ln(3)
+       float mult = 5.0 - depth;
+       mult = max(mult, 1.0); 
+       
+       float goldThick = (BASE_GAP * mult) / gridSize.x; 
        float goldBorder = drawStroke(abs(d), goldThick, globalPx);
        float pulse = 0.6 + 0.4 * sin(uTime * 4.0);
        color = mix(color, C_GOLD, goldBorder * pulse);

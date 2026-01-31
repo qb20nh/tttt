@@ -1,8 +1,8 @@
 import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
 import * as THREE from 'three';
 import Stats from 'stats.js';
-import type { BoardNode, Player } from '../game/types';
-import { BOARD_SIZE, DEPTH } from '../game/constants';
+import type { BoardNode, Player, Winner } from '../game/types';
+import { BOARD_SIZE } from '../game/constants';
 import { vertexShader, fragmentShader } from './shaders';
 import { getConstraintRect, mapUVToCell } from './layout';
 
@@ -16,15 +16,17 @@ interface Scene3DProps {
     board: BoardNode;
     activeConstraint: number[];
     currentPlayer: Player;
+    winner: Winner;
     onMove: (x: number, y: number) => void;
     statsInstance: Stats;
+    depth: number;
 }
 
 // HMR Persistence
 let persistedZoom = 0.9;
 let persistedPan = { x: 0, y: 0 };
 
-export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeConstraint, currentPlayer, onMove, statsInstance }, ref) => {
+export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeConstraint, currentPlayer, winner, onMove, statsInstance, depth }, ref) => {
     // ... (refs)
     const mountRef = useRef<HTMLDivElement>(null);
     const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -42,6 +44,27 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
 
     // Smooth Transition State
     const playerValRef = useRef(currentPlayer === 'X' ? 0 : 1);
+
+    // --- Interaction Helpers ---
+    const updateCamera = useCallback(() => {
+        if (!cameraRef.current || !rendererRef.current) return;
+        const w = rendererRef.current.domElement.width;
+        const h = rendererRef.current.domElement.height;
+        const aspect = w / h;
+        const zoom = zoomLevel.current;
+        const px = panOffset.current.x;
+        const py = panOffset.current.y;
+
+        // View width = 2 * aspect / zoom
+        const frusW = aspect / zoom;
+        const frusH = 1.0 / zoom;
+
+        cameraRef.current.left = -frusW + px;
+        cameraRef.current.right = frusW + px;
+        cameraRef.current.top = frusH + py;
+        cameraRef.current.bottom = -frusH + py;
+        cameraRef.current.updateProjectionMatrix();
+    }, []);
 
     // Expose Controls
     useImperativeHandle(ref, () => ({
@@ -68,7 +91,6 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
 
     const transitionRef = useRef({ start: 0, target: 0, startTime: 0 });
 
-
     // --- Board State to Texture ---
     const updateTexture = useCallback(() => {
         if (!textureRef.current || !board) return;
@@ -80,9 +102,9 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
         // Reset
         for (let i = 0; i < size * 4; i++) data[i] = 0;
 
-        const traverse = (node: BoardNode, x: number, y: number, depth: number) => {
+        const traverse = (node: BoardNode, x: number, y: number, currentDepth: number) => {
             // 1. Mark Leaf
-            if (depth === 0) {
+            if (currentDepth === 0) {
                 if (node.value) {
                     const idx = (y * BOARD_SIZE + x) * 4;
                     // r channel uses 0..1 range. 0.3 for X, 0.7 for O
@@ -95,13 +117,22 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
             const val = node.winner || node.value;
             if (val) {
                 // Flood fill this node's area in the appropriate channel
-                const channel = depth === 1 ? 1 : depth === 2 ? 2 : 3; // g, b, a
+                // We map depth to channel. 
+                // Leaf (depth 0) -> R (channel 0)
+                // Depth 1 -> G (channel 1)
+                // Depth 2 -> B (channel 2)
+                // Depth 3 -> A (channel 3)
+                // This assumes Max Depth 4. If Depth is 2, we use channels 0 and 1.
+                // We need to know 'level from bottom'. currentDepth IS level from bottom.
+
+                const channel = currentDepth;
+
                 // Pattern logic encoded in value (0.3/0.7 + pattern offsets)
                 const floatVal = (val === 'X' ? 0.3 : 0.7) + (node.winPattern >= 0 ? 0.02 * node.winPattern : 0);
 
                 const startX = x;
                 const startY = y;
-                const dim = Math.pow(3, depth);
+                const dim = Math.pow(3, currentDepth);
 
                 for (let dy = 0; dy < dim; dy++) {
                     for (let dx = 0; dx < dim; dx++) {
@@ -116,40 +147,19 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
             }
 
             if (node.children) {
-                const childSize = Math.pow(3, depth - 1);
+                const childSize = Math.pow(3, currentDepth - 1);
                 for (let i = 0; i < 9; i++) {
                     const childNode = node.children[i];
                     const cx = x + (i % 3) * childSize;
                     const cy = y + Math.floor(i / 3) * childSize;
-                    traverse(childNode, cx, cy, depth - 1);
+                    traverse(childNode, cx, cy, currentDepth - 1);
                 }
             }
         };
 
-        traverse(board, 0, 0, DEPTH);
+        traverse(board, 0, 0, depth);
         textureRef.current.needsUpdate = true;
-    }, [board]);
-
-    // --- Interaction Helpers ---
-    const updateCamera = useCallback(() => {
-        if (!cameraRef.current || !rendererRef.current) return;
-        const w = rendererRef.current.domElement.width;
-        const h = rendererRef.current.domElement.height;
-        const aspect = w / h;
-        const zoom = zoomLevel.current;
-        const px = panOffset.current.x;
-        const py = panOffset.current.y;
-
-        // View width = 2 * aspect / zoom
-        const frusW = aspect / zoom;
-        const frusH = 1.0 / zoom;
-
-        cameraRef.current.left = -frusW + px;
-        cameraRef.current.right = frusW + px;
-        cameraRef.current.top = frusH + py;
-        cameraRef.current.bottom = -frusH + py;
-        cameraRef.current.updateProjectionMatrix();
-    }, []);
+    }, [board, depth]);
 
     // --- Initialization ---
     useEffect(() => {
@@ -184,7 +194,7 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
 
         // Material
         const initialPlayerVal = currentPlayer === 'X' ? 0 : 1;
-        const initialConstraint = getConstraintRect(activeConstraint);
+        const initialConstraint = getConstraintRect(activeConstraint, depth);
         const material = new THREE.ShaderMaterial({
             vertexShader,
             fragmentShader,
@@ -194,6 +204,7 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
                 uConstraint: { value: new THREE.Vector4(initialConstraint.x, initialConstraint.y, initialConstraint.w, initialConstraint.h) },
                 uPlayer: { value: initialPlayerVal },
                 uTime: { value: 0 },
+                uDepth: { value: depth }
             },
         });
         materialRef.current = material;
@@ -204,7 +215,7 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
         const mesh = new THREE.Mesh(geometry, material);
         scene.add(mesh);
         // Loop Logic
-        let lastTime = 0;
+        let lastTime = performance.now();
         let animationId: number;
         let lastInputTime = performance.now();
 
@@ -222,7 +233,7 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
         document.body.addEventListener('pointerenter', handleEnter);
         document.body.addEventListener('pointerleave', handleLeave);
 
-        const renderFrame = (t: number) => {
+        const renderFrame = (t: number, dt: number) => {
             material.uniforms.uTime.value = t * 0.001;
 
             // Animate Player Color Transition
@@ -237,6 +248,23 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
 
             playerValRef.current = val;
             material.uniforms.uPlayer.value = val;
+
+            // Animate Constraint
+            const decay = 15.0; // Adjustable speed
+            const alpha = 1.0 - Math.exp(-decay * dt);
+
+            constraintRef.current.lerp(targetConstraintRef.current, alpha);
+
+            // Snap if close enough (Manual Manhattan distance)
+            const d = Math.abs(constraintRef.current.x - targetConstraintRef.current.x) +
+                Math.abs(constraintRef.current.y - targetConstraintRef.current.y) +
+                Math.abs(constraintRef.current.z - targetConstraintRef.current.z) +
+                Math.abs(constraintRef.current.w - targetConstraintRef.current.w);
+
+            if (d < 0.001) {
+                constraintRef.current.copy(targetConstraintRef.current);
+            }
+            material.uniforms.uConstraint.value.copy(constraintRef.current);
 
             renderer.render(scene, camera);
         };
@@ -255,9 +283,10 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
                 const delta = time - lastTime;
 
                 if (delta > bgInterval) {
+                    const dt = Math.min(delta / 1000, 0.1);
                     lastTime = time - (delta % bgInterval);
                     statsInstance.begin();
-                    renderFrame(time);
+                    renderFrame(time, dt);
                     statsInstance.end();
                 }
                 return;
@@ -265,8 +294,9 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
 
             // 2. Dragging (Highest Priority) - Uncapped VSync 
             if (isDragging.current) {
+                const dt = Math.min((time - lastTime) / 1000, 0.1);
                 statsInstance.begin();
-                renderFrame(time);
+                renderFrame(time, dt);
                 statsInstance.end();
                 lastTime = time;
                 return;
@@ -277,20 +307,22 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
 
             if (isActive) {
                 // Active: Uncapped (VSync Limit)
+                const dt = Math.min((time - lastTime) / 1000, 0.1);
                 statsInstance.begin();
-                renderFrame(time);
+                renderFrame(time, dt);
                 statsInstance.end();
                 lastTime = time;
             } else {
-                // Idle: Throttled to 30 FPS to save power
-                const targetFPS = 30;
+                // Idle: Throttled to 48 FPS to save power
+                const targetFPS = 48;
                 const interval = 1000 / targetFPS;
                 const delta = time - lastTime;
 
                 if (delta > interval) {
+                    const dt = Math.min(delta / 1000, 0.1);
                     lastTime = time - (delta % interval);
                     statsInstance.begin();
-                    renderFrame(time);
+                    renderFrame(time, dt);
                     statsInstance.end();
                 }
             }
@@ -326,27 +358,45 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
             geometry.dispose();
             if (node) node.removeChild(renderer.domElement);
         };
-    }, [updateCamera]);
+    }, [updateCamera, statsInstance]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Actually, if depth changes, material needs update for uDepth.
+    // texture needs update.
+    // geometry is same.
+    // If we want uDepth to update, we can do it in a separate useEffect.
 
     // --- Texture & Uniform Updates ---
     useEffect(() => {
         updateTexture();
     }, [updateTexture, board]);
 
+    // Constraint Animation State
+    const initialRect = getConstraintRect(activeConstraint, depth);
+    const constraintRef = useRef(new THREE.Vector4(initialRect.x, initialRect.y, initialRect.w, initialRect.h));
+    const targetConstraintRef = useRef(new THREE.Vector4(initialRect.x, initialRect.y, initialRect.w, initialRect.h));
+
     useEffect(() => {
         if (materialRef.current) {
-            const rect = getConstraintRect(activeConstraint);
-            materialRef.current.uniforms.uConstraint.value.set(rect.x, rect.y, rect.w, rect.h);
+            let rect = getConstraintRect(activeConstraint, depth);
+
+            // If game is over (winner exists), hide the constraint glow
+            if (winner) {
+                rect = { x: 0, y: 0, w: 0, h: 0 };
+            }
+
+            targetConstraintRef.current.set(rect.x, rect.y, rect.w, rect.h);
+
+            // Also update depth uniform!
+            materialRef.current.uniforms.uDepth.value = depth;
 
             const target = currentPlayer === 'X' ? 0 : 1;
-            // Start transition from CURRENT value (to handle mid-transition changes)
+            // Start transition from CURRENT value
             transitionRef.current = {
                 start: playerValRef.current,
                 target: target,
                 startTime: performance.now()
             };
         }
-    }, [activeConstraint, currentPlayer]);
+    }, [activeConstraint, currentPlayer, depth, winner]);
 
     const getUV = (e: React.MouseEvent | MouseEvent) => {
         if (!rendererRef.current) return { x: -1, y: -1 };
@@ -445,6 +495,7 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
 
                 panOffset.current.x -= (dx / w) * worldWidth;
                 panOffset.current.y += (dy / h) * worldHeight;
+                // eslint-disable-next-line
                 persistedPan = { ...panOffset.current };
 
                 updateCamera();
@@ -462,7 +513,7 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
         if (!materialRef.current) return;
 
         if (uv.x >= 0 && uv.x <= 1 && uv.y >= 0 && uv.y <= 1) {
-            const mapped = mapUVToCell(uv);
+            const mapped = mapUVToCell(uv, depth);
             if (mapped.valid) {
                 materialRef.current.uniforms.uHover.value.set(mapped.x, mapped.y);
 
@@ -489,7 +540,7 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
             // Click
             const uv = getUV(e);
             if (uv.x >= 0 && uv.x <= 1 && uv.y >= 0 && uv.y <= 1) {
-                const mapped = mapUVToCell(uv);
+                const mapped = mapUVToCell(uv, depth);
                 if (mapped.valid) {
                     onMove(mapped.x, mapped.y);
                 }
@@ -507,7 +558,7 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
     }, []);
 
     const isInsideConstraint = (uv: { x: number, y: number }, constraint: number[]) => {
-        const rect = getConstraintRect(constraint);
+        const rect = getConstraintRect(constraint, depth);
         return (uv.x >= rect.x && uv.x <= rect.x + rect.w &&
             uv.y >= rect.y && uv.y <= rect.y + rect.h);
     };

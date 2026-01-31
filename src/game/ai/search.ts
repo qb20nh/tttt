@@ -26,7 +26,8 @@ export function search(board: BoardNode, player: Player, constraint: number[], c
     // Depth 4 is full game lookahead (optimistic).
 
     for (let d = 1; d <= config.maxDepth; d++) {
-        const result = alphaBeta(board, player, constraint, d, -Infinity, Infinity);
+        // Pass config.boardDepth to alphaBeta
+        const result = alphaBeta(board, player, constraint, d, -Infinity, Infinity, config.boardDepth);
 
         if (abortSearch) break;
 
@@ -52,7 +53,7 @@ export function search(board: BoardNode, player: Player, constraint: number[], c
     };
 }
 
-function alphaBeta(board: BoardNode, player: Player, constraint: number[], depth: number, alpha: number, beta: number): { score: number, move: number[] | null } {
+function alphaBeta(board: BoardNode, player: Player, constraint: number[], depth: number, alpha: number, beta: number, boardDepth: number): { score: number, move: number[] | null } {
     nodesVisited++;
     if ((nodesVisited & 4095) === 0) {
         if (performance.now() - searchStartTime > timeLimit) {
@@ -65,17 +66,17 @@ function alphaBeta(board: BoardNode, player: Player, constraint: number[], depth
     // const hash = computeHash(board, player); // Expensive?
 
     if (depth === 0) {
-        return { score: evaluate(board, player), move: null };
+        return { score: evaluate(board, player, boardDepth), move: null };
     }
 
     // Move Gen
-    const moves = generateMoves(board, constraint);
+    const moves = generateMoves(board, constraint, boardDepth);
     if (moves.length === 0) {
         // No moves. Evaluated as loss or draw?
         // If I can't move, is it stalemate or loss?
         // In TTT, if board full, handled by evaluator (recursive win check).
         // If blocked, evaluate state.
-        return { score: evaluate(board, player), move: null };
+        return { score: evaluate(board, player, boardDepth), move: null };
     }
 
     // Move Ordering?
@@ -100,13 +101,13 @@ function alphaBeta(board: BoardNode, player: Player, constraint: number[], depth
             return { score: SCORE_WIN + depth, move };
         }
 
-        let nextConstraint = calculateNextConstraint(move, winLevel);
+        const nextConstraint = calculateNextConstraint(move, winLevel);
         while (nextConstraint.length > 0 && !isPlayable(board, nextConstraint)) {
             nextConstraint.pop();
         }
 
         const opponent = player === 'X' ? 'O' : 'X';
-        const result = alphaBeta(board, opponent, nextConstraint, depth - 1, -beta, -alpha);
+        const result = alphaBeta(board, opponent, nextConstraint, depth - 1, -beta, -alpha, boardDepth);
         const score = -result.score;
 
         undoMove(board, undo);

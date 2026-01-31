@@ -3,6 +3,7 @@
 export interface AIConfig {
     maxTime: number;
     maxDepth: number;
+    boardDepth: number;
     debug?: boolean;
 }
 

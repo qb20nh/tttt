@@ -11,15 +11,15 @@ const SCORES = {
 };
 
 // Evaluate board from perspective of 'player'
-export function evaluate(board: BoardNode, player: Player): number {
-    return evaluateNode(board, player, 0);
+export function evaluate(board: BoardNode, player: Player, boardDepth: number): number {
+    return evaluateNode(board, player, 0, boardDepth);
 }
 
-function evaluateNode(node: BoardNode, player: Player, level: number): number {
+function evaluateNode(node: BoardNode, player: Player, level: number, boardDepth: number): number {
     // If this node is won by someone
     if (node.winner) {
-        if (node.winner === player) return SCORES.WIN * (4 - level);
-        return SCORES.LOSS * (4 - level);
+        if (node.winner === player) return SCORES.WIN * (boardDepth - level);
+        return SCORES.LOSS * (boardDepth - level);
     }
 
     // If it's a leaf and has a value
@@ -46,7 +46,7 @@ function evaluateNode(node: BoardNode, player: Player, level: number): number {
     // Check for 2-in-a-rows of children
     const patternScore = evaluatePatterns(node.children, player);
 
-    score += patternScore * (4 - level) * 10;
+    score += patternScore * (boardDepth - level) * 10;
 
     // Add up scores from children (weighted lower)
     // We only recurse if we are NOT at the drawing limit of the canvas... wait this is AI.
@@ -66,7 +66,7 @@ function evaluateNode(node: BoardNode, player: Player, level: number): number {
             else if ((child.winner || child.value) !== null) score += SCORES.DISADVANTAGE;
         } else {
             // Recurse to capture nested advantages
-            score += evaluateNode(child, player, level + 1) * 0.2;
+            score += evaluateNode(child, player, level + 1, boardDepth) * 0.2;
         }
     }
 
