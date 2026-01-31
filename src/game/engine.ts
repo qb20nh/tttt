@@ -4,6 +4,12 @@ import { DEFAULT_DEPTH } from './constants';
 import { checkWin, generateBoard, isFull, canWin } from './logic';
 import { loadGameState, saveGameState, clearSavedState } from './persistence';
 
+declare global {
+    interface Window {
+        runAiBenchmark: () => void;
+    }
+}
+
 export const useGameState = (initialDepth: number = DEFAULT_DEPTH) => {
     // Load saved state once on mount
     const [savedState] = useState(() => loadGameState());
@@ -262,6 +268,10 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH) => {
 
     const resetGame = (newMode?: GameMode, newDepth?: number) => {
         clearSavedState();
+
+        // Clear AI memory
+        workerRef.current?.postMessage({ type: 'clear' });
+
         const d = newDepth !== undefined ? newDepth : depth;
         // Update depth state effectively?
         if (newDepth !== undefined) setDepth(newDepth);
@@ -278,33 +288,58 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH) => {
     useEffect(() => {
         if (!workerRef.current) return;
 
+        window.runAiBenchmark = () => {
+            console.log("Starting 2s Benchmark...");
+            workerRef.current?.postMessage({
+                type: 'benchmark',
+                board: latestState.current.board,
+                player: latestState.current.currentPlayer,
+                constraint: latestState.current.activeConstraint,
+                config: { maxTime: 2000, maxDepth: 8, boardDepth: latestState.current.depth }
+            });
+        };
+
         workerRef.current.onmessage = async (e) => {
             const { type, result } = e.data;
+
+            if (type === 'benchmark_result') {
+                console.table(result);
+                alert(`Benchmark Complete!\nDefault AI Performance:\nNPS: ${Math.round(result.default.nps).toLocaleString()}\nNodes: ${result.default.nodes}\nTime: ${Math.round(result.default.time)}ms`);
+                return;
+            }
+
             if (type === 'result') {
                 const current = latestState.current;
                 const d = current.depth;
 
-                let gx = 0;
-                let gy = 0;
-                for (let i = 0; i < d; i++) {
-                    const idx = result.move[i];
-                    if (idx === undefined) break;
-                    const scale = Math.pow(3, d - 1 - i);
-                    gx += (idx % 3) * scale;
-                    gy += Math.floor(idx / 3) * scale;
-                }
+                // Enforce minimum thinking time for UX (500ms)
+                const elapsed = performance.now() - aiStartTimeRef.current;
+                const minDelay = 500;
+                const remaining = Math.max(0, minDelay - elapsed);
 
-                let isValidAiMove = false;
-                if (current.gameMode === 'PvAI' && current.currentPlayer === 'O') isValidAiMove = true;
-                if (current.gameMode === 'AIvAI') isValidAiMove = true;
-
-                if (isValidAiMove) {
-                    const update = handleMoveInternal(gx, gy, current.board, current.activeConstraint, current.currentPlayer, current.winner, d);
-                    if (update) {
-                        applyMove(update);
+                setTimeout(() => {
+                    let gx = 0;
+                    let gy = 0;
+                    for (let i = 0; i < d; i++) {
+                        const idx = result.move[i];
+                        if (idx === undefined) break;
+                        const scale = Math.pow(3, d - 1 - i);
+                        gx += (idx % 3) * scale;
+                        gy += Math.floor(idx / 3) * scale;
                     }
-                }
-                setIsAiThinking(false);
+
+                    let isValidAiMove = false;
+                    if (current.gameMode === 'PvAI' && current.currentPlayer === 'O') isValidAiMove = true;
+                    if (current.gameMode === 'AIvAI') isValidAiMove = true;
+
+                    if (isValidAiMove) {
+                        const update = handleMoveInternal(gx, gy, current.board, current.activeConstraint, current.currentPlayer, current.winner, d);
+                        if (update) {
+                            applyMove(update);
+                        }
+                    }
+                    setIsAiThinking(false);
+                }, remaining);
             }
         };
     }, []);
