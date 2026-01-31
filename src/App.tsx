@@ -20,12 +20,14 @@ function App() {
   const [stats, setStats] = useState<Stats | null>(null);
 
   useEffect(() => {
-    // Lazy load stats.js only in development or if needed
-    import('stats.js').then(({ default: Stats }) => {
-      const s = new Stats();
-      s.showPanel(0);
-      setStats(s);
-    });
+    if (import.meta.env.DEV) {
+      // Lazy load stats.js only in development or if needed
+      import('stats.js').then(({ default: Stats }) => {
+        const s = new Stats();
+        s.showPanel(0);
+        setStats(s);
+      });
+    }
   }, []);
 
   const { board, currentPlayer, activeConstraint, winner, handleMove, resetGame, isAiThinking } = useGameState(depth);
