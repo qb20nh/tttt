@@ -1,6 +1,6 @@
 import { RotateCcw, Home, Plus, Minus, ArrowLeft, X, Circle, Loader2 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
-import Stats from 'stats.js';
+import type Stats from 'stats.js';
 import type { Player, Winner } from '../game/types';
 import { ConfirmationModal } from './ConfirmationModal';
 
@@ -13,7 +13,7 @@ interface GameOverlayProps {
     onResetView: () => void;
     onMainMenu: () => void;
     isAiThinking: boolean;
-    statsInstance: Stats;
+    statsInstance: Stats | null;
 }
 
 export const GameOverlay = ({

@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import Stats from 'stats.js';
+import { useState, useRef, useEffect } from 'react';
+import type Stats from 'stats.js';
 import { useGameState } from './game/engine';
 import { Scene3D, type Scene3DHandle } from './graphics/Scene3D';
 import { GameOverlay } from './components/GameOverlay';
@@ -17,11 +17,16 @@ function App() {
   const [showMenuConfirm, setShowMenuConfirm] = useState(false);
   const [depth, setDepth] = useState(savedGame?.depth || 4);
   // Persistent stats instance
-  const [stats] = useState(() => {
-    const s = new Stats();
-    s.showPanel(0);
-    return s;
-  });
+  const [stats, setStats] = useState<Stats | null>(null);
+
+  useEffect(() => {
+    // Lazy load stats.js only in development or if needed
+    import('stats.js').then(({ default: Stats }) => {
+      const s = new Stats();
+      s.showPanel(0);
+      setStats(s);
+    });
+  }, []);
 
   const { board, currentPlayer, activeConstraint, winner, handleMove, resetGame, isAiThinking } = useGameState(depth);
   const sceneRef = useRef<Scene3DHandle>(null);

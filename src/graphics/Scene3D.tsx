@@ -1,6 +1,20 @@
 import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
-import * as THREE from 'three';
-import Stats from 'stats.js';
+import {
+    WebGLRenderer,
+    Scene,
+    OrthographicCamera,
+    ShaderMaterial,
+    DataTexture,
+    FloatType,
+    NearestFilter,
+    RGBAFormat,
+    Vector2,
+    Vector4,
+    PlaneGeometry,
+    Mesh,
+    MathUtils
+} from 'three';
+import type Stats from 'stats.js';
 import type { BoardNode, Player, Winner } from '../game/types';
 import { BOARD_SIZE } from '../game/constants';
 import { vertexShader, fragmentShader } from './shaders';
@@ -18,7 +32,7 @@ interface Scene3DProps {
     currentPlayer: Player;
     winner: Winner;
     onMove: (x: number, y: number) => void;
-    statsInstance: Stats;
+    statsInstance: Stats | null;
     depth: number;
 }
 
@@ -29,11 +43,11 @@ let persistedPan = { x: 0, y: 0 };
 export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeConstraint, currentPlayer, winner, onMove, statsInstance, depth }, ref) => {
     // ... (refs)
     const mountRef = useRef<HTMLDivElement>(null);
-    const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-    const sceneRef = useRef<THREE.Scene | null>(null);
-    const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
-    const materialRef = useRef<THREE.ShaderMaterial | null>(null);
-    const textureRef = useRef<THREE.DataTexture | null>(null);
+    const rendererRef = useRef<WebGLRenderer | null>(null);
+    const sceneRef = useRef<Scene | null>(null);
+    const cameraRef = useRef<OrthographicCamera | null>(null);
+    const materialRef = useRef<ShaderMaterial | null>(null);
+    const textureRef = useRef<DataTexture | null>(null);
     const isDragging = useRef(false);
     const isHovering = useRef(true);
     const dragStartPos = useRef({ x: 0, y: 0 });
@@ -166,7 +180,7 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
         if (!mountRef.current) return;
 
         // Renderer
-        const renderer = new THREE.WebGLRenderer({
+        const renderer = new WebGLRenderer({
             antialias: true,
             powerPreference: 'high-performance',
             preserveDrawingBuffer: true,
@@ -177,31 +191,31 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
         rendererRef.current = renderer;
 
         // Scene & Cam
-        const scene = new THREE.Scene();
+        const scene = new Scene();
         sceneRef.current = scene;
-        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+        const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
         camera.position.z = 1;
         cameraRef.current = camera;
 
         // State Texture
         const size = BOARD_SIZE * BOARD_SIZE;
         const data = new Float32Array(size * 4);
-        const texture = new THREE.DataTexture(data, BOARD_SIZE, BOARD_SIZE, THREE.RGBAFormat, THREE.FloatType);
-        texture.magFilter = THREE.NearestFilter;
-        texture.minFilter = THREE.NearestFilter;
+        const texture = new DataTexture(data, BOARD_SIZE, BOARD_SIZE, RGBAFormat, FloatType);
+        texture.magFilter = NearestFilter;
+        texture.minFilter = NearestFilter;
         texture.needsUpdate = true;
         textureRef.current = texture;
 
         // Material
         const initialPlayerVal = currentPlayer === 'X' ? 0 : 1;
         const initialConstraint = getConstraintRect(activeConstraint, depth);
-        const material = new THREE.ShaderMaterial({
+        const material = new ShaderMaterial({
             vertexShader,
             fragmentShader,
             uniforms: {
                 uStateTexture: { value: texture },
-                uHover: { value: new THREE.Vector2(-1, -1) },
-                uConstraint: { value: new THREE.Vector4(initialConstraint.x, initialConstraint.y, initialConstraint.w, initialConstraint.h) },
+                uHover: { value: new Vector2(-1, -1) },
+                uConstraint: { value: new Vector4(initialConstraint.x, initialConstraint.y, initialConstraint.w, initialConstraint.h) },
                 uPlayer: { value: initialPlayerVal },
                 uTime: { value: 0 },
                 uDepth: { value: depth }
@@ -211,8 +225,8 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
         playerValRef.current = initialPlayerVal; // Sync ref too
 
         // Geometry
-        const geometry = new THREE.PlaneGeometry(2, 2);
-        const mesh = new THREE.Mesh(geometry, material);
+        const geometry = new PlaneGeometry(2, 2);
+        const mesh = new Mesh(geometry, material);
         scene.add(mesh);
         // Loop Logic
         let lastTime = performance.now();
@@ -243,8 +257,8 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
             let p = (now - startTime) / duration;
             p = Math.max(0, Math.min(1, p));
             // smoothstep ease
-            const ease = THREE.MathUtils.smoothstep(p, 0, 1);
-            const val = THREE.MathUtils.lerp(colorStart, target, ease);
+            const ease = MathUtils.smoothstep(p, 0, 1);
+            const val = MathUtils.lerp(colorStart, target, ease);
 
             playerValRef.current = val;
             material.uniforms.uPlayer.value = val;
@@ -285,9 +299,9 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
                 if (delta > bgInterval) {
                     const dt = Math.min(delta / 1000, 0.1);
                     lastTime = time - (delta % bgInterval);
-                    statsInstance.begin();
+                    statsInstance?.begin();
                     renderFrame(time, dt);
-                    statsInstance.end();
+                    statsInstance?.end();
                 }
                 return;
             }
@@ -295,9 +309,9 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
             // 2. Dragging (Highest Priority) - Uncapped VSync 
             if (isDragging.current) {
                 const dt = Math.min((time - lastTime) / 1000, 0.1);
-                statsInstance.begin();
+                statsInstance?.begin();
                 renderFrame(time, dt);
-                statsInstance.end();
+                statsInstance?.end();
                 lastTime = time;
                 return;
             }
@@ -308,9 +322,9 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
             if (isActive) {
                 // Active: Uncapped (VSync Limit)
                 const dt = Math.min((time - lastTime) / 1000, 0.1);
-                statsInstance.begin();
+                statsInstance?.begin();
                 renderFrame(time, dt);
-                statsInstance.end();
+                statsInstance?.end();
                 lastTime = time;
             } else {
                 // Idle: Throttled to 48 FPS to save power
@@ -321,9 +335,9 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
                 if (delta > interval) {
                     const dt = Math.min(delta / 1000, 0.1);
                     lastTime = time - (delta % interval);
-                    statsInstance.begin();
+                    statsInstance?.begin();
                     renderFrame(time, dt);
-                    statsInstance.end();
+                    statsInstance?.end();
                 }
             }
         };
@@ -371,8 +385,8 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
 
     // Constraint Animation State
     const initialRect = getConstraintRect(activeConstraint, depth);
-    const constraintRef = useRef(new THREE.Vector4(initialRect.x, initialRect.y, initialRect.w, initialRect.h));
-    const targetConstraintRef = useRef(new THREE.Vector4(initialRect.x, initialRect.y, initialRect.w, initialRect.h));
+    const constraintRef = useRef(new Vector4(initialRect.x, initialRect.y, initialRect.w, initialRect.h));
+    const targetConstraintRef = useRef(new Vector4(initialRect.x, initialRect.y, initialRect.w, initialRect.h));
 
     useEffect(() => {
         if (materialRef.current) {
