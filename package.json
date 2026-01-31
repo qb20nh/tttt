@@ -11,9 +11,9 @@
     "preinstall": "npx only-allow pnpm"
   },
   "engines": {
-    "pnpm": ">=9"
+    "pnpm": ">=10"
   },
-  "packageManager": "pnpm@10.27.0",
+  "packageManager": "pnpm@10.28.2",
   "dependencies": {
     "@tailwindcss/vite": "^4.1.18",
     "lucide-react": "^0.563.0",
