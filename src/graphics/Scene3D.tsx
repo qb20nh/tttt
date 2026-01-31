@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { useRef, useEffect, useState, useCallback, useImperativeHandle } from 'react';
 import {
     WebGLRenderer,
     Scene,
@@ -40,7 +40,7 @@ interface Scene3DProps {
 let persistedZoom = 0.9;
 let persistedPan = { x: 0, y: 0 };
 
-export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeConstraint, currentPlayer, winner, onMove, statsInstance, depth }, ref) => {
+export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove, statsInstance, depth, ref }: Scene3DProps & { ref?: React.Ref<Scene3DHandle> }) => {
     // ... (refs)
     const mountRef = useRef<HTMLDivElement>(null);
     const rendererRef = useRef<WebGLRenderer | null>(null);
@@ -595,4 +595,4 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({ board, activeC
             />
         </div>
     );
-}); // Close forwardRef
+};
