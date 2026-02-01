@@ -73,8 +73,6 @@ export function initTables() {
                 // 2-in-row (cx=2, co=0) -> Threat
                 if (cx === 2 && co === 0) score += SCORE_NEAR_X;
                 else if (co === 2 && cx === 0) score += SCORE_NEAR_O;
-                else if (cx === 1 && co === 0) score += SCORE_ADV_X;
-                else if (co === 1 && cx === 0) score += SCORE_ADV_O;
             }
 
             // Positional Bonuses

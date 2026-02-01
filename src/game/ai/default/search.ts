@@ -1,6 +1,7 @@
 import { Board } from './board';
 import { MoveGen } from './movegen';
 import { CELL_EMPTY, CELL_X, CELL_O } from './constants';
+import { LUT_WIN_STATUS_BASE4 } from './lookup';
 import { tt } from './transposition';
 import { ZOBRIST_SIDE, ZOBRIST_CONSTRAINT } from './zobrist';
 
@@ -125,41 +126,67 @@ export class Search {
             return { score: board.evaluate(player), move: -1 };
         }
 
-        // Basic Move Ordering (Static)
-        // Center (4) > Corner (0,2,6,8) > Edge
-        // We use a small inline scoring or simply sort.
-        // For efficiency, we can just use a temporary array and sort.
+        // Move Ordering with Dynamic Scoring
+        // We pack Score + Move into Int32Array: (Score << 16) | Move
+        // Scores:
+        // Win Local Board: +1000
+        // Center: +50
+        // Corner: +20
+        // Base: 2000 (to keep positive)
+
         if (count > 1) {
-            // Sort scope: MOVE_STACK[stackOffset ... stackOffset + count - 1]
+            // Precompute scores and pack
+            const leafParentLayer = board.depth - 1;
 
+            for (let i = 0; i < count; i++) {
+                const move = MOVE_STACK[stackOffset + i];
+                const relMove = move % 9;
+
+                let score = 2000;
+
+                // 1. Check Win Local Board
+                // Key of parent board
+                const parentIdx = (move / 9) >>> 0;
+                const oldKey = board.keys[leafParentLayer][parentIdx];
+
+                // Simulate Move on Key (Bitwise)
+                // New Val = Player (1 or 2)
+                const pVal = (player === CELL_X) ? 1 : 2;
+                const shift = relMove * 2;
+
+                // Verify empty? MoveGen ensures it is empty.
+                const newKey = oldKey | (pVal << shift);
+
+                const winStatus = LUT_WIN_STATUS_BASE4[newKey];
+
+                if (winStatus === player) {
+                    score += 1000;
+                } else if (winStatus !== 0) {
+                    score += 100;
+                }
+
+                // 2. Positional
+                if (relMove === 4) score += 50;
+                else if (relMove === 0 || relMove === 2 || relMove === 6 || relMove === 8) score += 20;
+
+                // Pack: Ensure score fits in 15 bits.
+                MOVE_STACK[stackOffset + i] = (score << 16) | move;
+            }
+
+            // Sort Descending
             const subarray = MOVE_STACK.subarray(stackOffset, stackOffset + count);
-            subarray.sort((a, b) => {
-                // Heuristic:
-                // Center (4) -> Score 2
-                // Corner (0,2,6,8) -> Score 1
-                // Edge -> Score 0
-
-                const ra = a % 9;
-                const rb = b % 9;
-
-                let sa = 0;
-                if (ra === 4) sa = 2;
-                else if (ra === 0 || ra === 2 || ra === 6 || ra === 8) sa = 1;
-
-                let sb = 0;
-                if (rb === 4) sb = 2;
-                else if (rb === 0 || rb === 2 || rb === 6 || rb === 8) sb = 1;
-
-                return sb - sa; // Descending
-            });
+            subarray.sort((a, b) => b - a);
         }
 
         // Move Ordering: TT Move First
         if (ttEntry && ttEntry.bestMove !== -1) {
             for (let i = 0; i < count; i++) {
-                if (MOVE_STACK[stackOffset + i] === ttEntry.bestMove) {
+                // Check against Unpacked Move
+                const packed = MOVE_STACK[stackOffset + i];
+                const moveOnly = packed & 0xFFFF;
+                if (moveOnly === ttEntry.bestMove) {
                     const temp = MOVE_STACK[stackOffset];
-                    MOVE_STACK[stackOffset] = MOVE_STACK[stackOffset + i];
+                    MOVE_STACK[stackOffset] = packed;
                     MOVE_STACK[stackOffset + i] = temp;
                     break;
                 }
@@ -174,7 +201,9 @@ export class Search {
         const oldLayer = board.constraintLayer;
 
         for (let i = 0; i < count; i++) {
-            const move = MOVE_STACK[stackOffset + i];
+            // Unpack Move
+            const packed = MOVE_STACK[stackOffset + i];
+            const move = packed & 0xFFFF;
 
             // Apply Move
             const changedLevel = board.setCell(move, player);
