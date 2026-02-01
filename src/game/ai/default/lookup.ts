@@ -1,6 +1,6 @@
 import { CELL_EMPTY, CELL_X, CELL_O, CELL_DRAW, WIN_PATTERNS } from './constants';
 
-export const TABLE_SIZE = 19683; // 3^9 ? No, Base 4. 262144.
+export const TABLE_SIZE = 19683; // 3^9
 
 // Powers of 4 precomputed
 export const POW4 = [1, 4, 16, 64, 256, 1024, 4096, 16384, 65536];
@@ -75,6 +75,19 @@ export function initTables() {
                 else if (co === 2 && cx === 0) score += SCORE_NEAR_O;
                 else if (cx === 1 && co === 0) score += SCORE_ADV_X;
                 else if (co === 1 && cx === 0) score += SCORE_ADV_O;
+            }
+
+            // Positional Bonuses
+            // Center (4)
+            const cVal = cells[4];
+            if (cVal === CELL_X) score += 5;
+            else if (cVal === CELL_O) score -= 5;
+
+            // Corners (0, 2, 6, 8)
+            for (const idx of [0, 2, 6, 8]) {
+                const val = cells[idx];
+                if (val === CELL_X) score += 2;
+                else if (val === CELL_O) score -= 2;
             }
         }
 

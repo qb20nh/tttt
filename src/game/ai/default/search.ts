@@ -125,6 +125,35 @@ export class Search {
             return { score: board.evaluate(player), move: -1 };
         }
 
+        // Basic Move Ordering (Static)
+        // Center (4) > Corner (0,2,6,8) > Edge
+        // We use a small inline scoring or simply sort.
+        // For efficiency, we can just use a temporary array and sort.
+        if (count > 1) {
+            // Sort scope: MOVE_STACK[stackOffset ... stackOffset + count - 1]
+
+            const subarray = MOVE_STACK.subarray(stackOffset, stackOffset + count);
+            subarray.sort((a, b) => {
+                // Heuristic:
+                // Center (4) -> Score 2
+                // Corner (0,2,6,8) -> Score 1
+                // Edge -> Score 0
+
+                const ra = a % 9;
+                const rb = b % 9;
+
+                let sa = 0;
+                if (ra === 4) sa = 2;
+                else if (ra === 0 || ra === 2 || ra === 6 || ra === 8) sa = 1;
+
+                let sb = 0;
+                if (rb === 4) sb = 2;
+                else if (rb === 0 || rb === 2 || rb === 6 || rb === 8) sb = 1;
+
+                return sb - sa; // Descending
+            });
+        }
+
         // Move Ordering: TT Move First
         if (ttEntry && ttEntry.bestMove !== -1) {
             for (let i = 0; i < count; i++) {

@@ -1,4 +1,4 @@
-import { CELL_O } from './constants';
+import { CELL_O, CELL_X } from './constants';
 import { LUT_WIN_STATUS_BASE4, LUT_SCORE_BASE4, initTables } from './lookup';
 import { ZOBRIST_TABLE } from './zobrist';
 
@@ -135,6 +135,14 @@ export class Board {
         // Cap heuristic to ensure it never exceeds terminal win detection threshold
         const MAX_HEURISTIC = 50000;
         score = Math.max(-MAX_HEURISTIC, Math.min(MAX_HEURISTIC, score));
+
+        // Free Move Advantage
+        // Being unconstrained (constraint === -1) is a significant advantage for the player whose turn it is.
+        // Since evaluate() is called for the player to move, we award a bonus if they have a free move.
+        if (this.constraint === -1) {
+            if (player === CELL_X) score += 20;
+            else if (player === CELL_O) score -= 20;
+        }
 
         if (player === CELL_O) return -score;
         return score;
