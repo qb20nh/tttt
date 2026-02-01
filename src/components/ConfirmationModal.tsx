@@ -23,7 +23,7 @@ export const ConfirmationModal = ({
     if (!isOpen) return null;
 
     return (
-        <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300">
+        <div className="absolute inset-0 z-50 bg-black/90 flex items-center justify-center p-4 animate-in fade-in duration-300">
             <div className="max-w-md w-full bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-6 transform scale-100 transition-all">
                 <h2 className="text-2xl font-bold text-white mb-4">{title}</h2>
                 <p className="text-slate-300 mb-8 leading-relaxed">

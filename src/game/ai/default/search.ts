@@ -20,8 +20,7 @@ export class Search {
         this.timeLimit = timeout;
         this.abort = false;
 
-        // First Move Optimization: On empty board for D>=3, all positions are equivalent
-        // Return random move immediately to save compute time (D=2 is small enough to search)
+        // Optimization: For D>=3, return random move on empty board to save time
         if (board.depth >= 3 && this.isBoardEmpty(board)) {
             const totalCells = board.leaves.length;
             const randomMove = Math.floor(Math.random() * totalCells);
@@ -47,11 +46,8 @@ export class Search {
             if (result.score > 90000) break;
         }
 
-        // Final Safety Check: If we somehow still have -1 (e.g. empty board loop?), try to find something.
-        // But D=1 guarantee should fix 99% of cases.
         if (bestMove === -1) {
-            // Fallback: Just return ANY valid move if we have nothing.
-            // This prevents "No move" error.
+            // Fallback: Pick random move if search failed to find one (rare)
             const count = MoveGen.generate(board, MOVE_STACK, 0);
             if (count > 0) {
                 // Pick random to avoid bias
@@ -93,9 +89,7 @@ export class Search {
         let currentHash = board.hash;
         if (player === CELL_O) currentHash ^= ZOBRIST_SIDE;
 
-        // Use proper Zobrist for constraint
-        // Constraint range: -1 (free) to 729 (9^3 for D=4), so +1 gives 0-730
-        // Mask to 0-1023 ensures safe array indexing (ZOBRIST_CONSTRAINT has 1024 entries)
+        // Constraint Zobrist (0-730 mapped to 0-1023)
         const constraintIdx = ((board.constraint + 1) & 1023);
         currentHash ^= ZOBRIST_CONSTRAINT[constraintIdx];
 
@@ -126,13 +120,8 @@ export class Search {
             return { score: board.evaluate(player), move: -1 };
         }
 
-        // Move Ordering with Dynamic Scoring
-        // We pack Score + Move into Int32Array: (Score << 16) | Move
-        // Scores:
-        // Win Local Board: +1000
-        // Center: +50
-        // Corner: +20
-        // Base: 2000 (to keep positive)
+        // Move Ordering: Pack (Score << 16) | Move
+        // Scores: Win Local (1000), Center (50), Corner (20), Base (2000)
 
         if (count > 1) {
             // Precompute scores and pack

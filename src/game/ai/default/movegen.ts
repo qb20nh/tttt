@@ -25,18 +25,8 @@ export class MoveGen {
                 validSubboard = true;
 
                 // Calculate Leaf Range covered by this constraint
-                // We are at Layer C. Leaves are at Layer D.
-                // Scale = 9^(D - 1 - C) ? 
-                // Wait. Layer D-1 (Leaf Parents) -> Scale 1 (Size 9).
-                // Layer D-2 -> Scale 9 (Size 81).
-                // Scale = 9^(D - 1 - constraintLayer).
-
-                // Example: D=4. Leafs.
-                // Constraint at Layer 3 (Leaf Parent). D-1=3. Scale=1. Ranges 9 leafs.
-                // Constraint at Layer 2. Scale=9. Ranges 81 leafs.
-
                 const power = D - 1 - constraintLayer;
-                // Precompute powers? Math.pow(9, p)
+                // Scale = 9^(D - 1 - constraintLayer)
                 let scale = 1;
                 for (let k = 0; k < power; k++) scale *= 9;
 
@@ -56,9 +46,7 @@ export class MoveGen {
             // Check if leaf is empty
             if (board.leaves[i] === CELL_EMPTY) {
                 // If Global Search (or Constraint Invalidated), we must check ancestry playability.
-                // Check ancestry playability (Intermediate Constraints)
-                // Even if the constrained board itself is valid, recursive sub-boards within it might be won.
-                // We must check ancestors from Leaf Parent up to the Constraint Layer (exclusive).
+                // Validate ancestry from Leaf Parent up to Constraint Layer (exclusive).
                 const checkLimit = validSubboard ? (constraintLayer + 1) : 0;
 
                 let ancestorIdx = i;
@@ -69,15 +57,11 @@ export class MoveGen {
                     if (MoveGen.isNodeFullOrWon(board, layer, ancestorIdx)) {
                         // Skip all leaves under this won/full ancestor
                         const power = D - layer;
-                        let skipSize = 1; // 9^0
+                        let skipSize = 1;
                         for (let k = 0; k < power; k++) skipSize *= 9;
 
-                        // Calculate the last leaf index under this invalid ancestor
-                        // ancestorIdx is the index at 'layer'.
-                        // We want the last leaf.
-                        // Wait. skipSize calculation above seems to be 9^(D-layer).
-                        // If layer = D-1. power = 1. skipSize = 9.
-                        // (ancestorIdx + 1) * 9 - 1. Correct.
+                        // Calculate last leaf index to skip to
+                        // skipTo = (ancestorIdx + 1) * 9^(power) - 1
 
                         skipTo = (ancestorIdx + 1) * skipSize - 1;
                         break;

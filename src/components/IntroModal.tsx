@@ -9,7 +9,7 @@ export const IntroModal = ({ show, onDismiss }: IntroModalProps) => {
     if (!show) return null;
 
     return (
-        <div className="absolute inset-0 z-40 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-500">
+        <div className="absolute inset-0 z-40 bg-black/90 flex items-center justify-center p-4 animate-in fade-in duration-500">
             <div className="max-w-2xl w-full bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-8 overflow-hidden relative">
                 <div className="flex justify-between items-start mb-6">
                     <h1 className="text-4xl font-black bg-gradient-to-r from-cyan-400 to-blue-600 bg-clip-text text-transparent">

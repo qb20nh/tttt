@@ -13,11 +13,7 @@ export class Board {
     // size = 9^depth
     public leaves: Int8Array;
 
-    // hierarchy: Array of keys for each level above leaves.
-    // keys[0] = Root key (size 1)
-    // keys[1] = Level 1 keys (size 9)
-    // ...
-    // keys[depth-1] = Leaf Parents (size 9^(depth-1))
+    // Keys for each hierarchy level (Leaf Parents to Root)
     public keys: Int32Array[];
 
     // Constraint: Index of the board we are constrained to
@@ -115,12 +111,7 @@ export class Board {
     public evaluate(player: number): number {
         let score = 0;
 
-        // Evaluate all layers with diminishing weights
-        // Weights are chosen so total heuristic stays well below 90000 (terminal win threshold)
-        // Layer 0 (Root): Weight 100
-        // Layer 1: Weight 10
-        // Layer 2: Weight 1
-        // Layer 3+: Weight 1
+        // Evaluate layers with diminishing weights (1000 -> 100 -> 10 -> 1)
 
         let weight = 1000;
         for (let d = 0; d < this.depth; d++) {
@@ -136,9 +127,7 @@ export class Board {
         const MAX_HEURISTIC = 50000;
         score = Math.max(-MAX_HEURISTIC, Math.min(MAX_HEURISTIC, score));
 
-        // Free Move Advantage
-        // Being unconstrained (constraint === -1) is a significant advantage for the player whose turn it is.
-        // Since evaluate() is called for the player to move, we award a bonus if they have a free move.
+        // Free Move Advantage: Bonus for being unconstrained
         if (this.constraint === -1) {
             if (player === CELL_X) score += 20;
             else if (player === CELL_O) score -= 20;

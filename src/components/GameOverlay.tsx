@@ -80,7 +80,7 @@ export const GameOverlay = ({
             <div className="absolute top-4 left-4 z-10">
                 <button
                     onClick={onMainMenu}
-                    className="bg-slate-900/80 backdrop-blur-md border border-slate-700 p-3 rounded-xl shadow-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all active:scale-95 group cursor-pointer"
+                    className="bg-slate-900/90 border border-slate-700 p-3 rounded-xl shadow-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all active:scale-95 group cursor-pointer"
                     title="Main Menu"
                 >
                     <ArrowLeft className="w-6 h-6 group-hover:scale-110 group-hover:-translate-x-1 transition-transform" />
@@ -96,7 +96,7 @@ export const GameOverlay = ({
             <div className="absolute top-4 right-4 z-10">
                 <button
                     onClick={() => setShowResetConfirm(true)}
-                    className="bg-slate-900/80 backdrop-blur-md border border-slate-700 p-3 rounded-xl shadow-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all active:scale-95 group cursor-pointer"
+                    className="bg-slate-900/90 border border-slate-700 p-3 rounded-xl shadow-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all active:scale-95 group cursor-pointer"
                     title="Reset Game"
                 >
                     <RotateCcw className="w-6 h-6 group-hover:-rotate-180 transition-transform duration-500" />
@@ -105,7 +105,7 @@ export const GameOverlay = ({
 
             {/* Bottom Left: Current Turn & AI Indicator */}
             <div className="absolute bottom-4 left-4 z-10 pointer-events-none">
-                <div className="bg-slate-900/80 backdrop-blur-md border border-slate-700 p-4 rounded-xl shadow-2xl transition-all duration-300 ease-out">
+                <div className="bg-slate-900/90 border border-slate-700 p-4 rounded-xl shadow-2xl transition-all duration-300 ease-out">
                     <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">Current Turn</div>
                     <div className="flex items-center gap-4">
                         {/* Player Shape Icon - Fixed container for stability & optical balance */}
@@ -130,7 +130,7 @@ export const GameOverlay = ({
 
             {/* Bottom Right: Zoom Controls */}
             <div className="absolute bottom-4 right-4 z-10">
-                <div className="flex bg-slate-900/80 backdrop-blur-md border border-slate-700 rounded-xl overflow-hidden shadow-2xl">
+                <div className="flex bg-slate-900/90 border border-slate-700 rounded-xl overflow-hidden shadow-2xl">
                     <button
                         onClick={onZoomOut}
                         className="p-3 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors active:bg-slate-700 cursor-pointer"
@@ -168,7 +168,7 @@ export const GameOverlay = ({
 
             {/* Winner Overlay */}
             {winner && !dismissed && (
-                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90 animate-in fade-in duration-300">
                     <div className="relative bg-slate-900 border border-slate-700 p-8 rounded-2xl shadow-2xl text-center max-w-sm mx-4 transform transition-all scale-100">
                         {/* Dismiss Button */}
                         <button

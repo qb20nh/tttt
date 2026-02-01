@@ -48,9 +48,6 @@ export const canWin = (board: BoardNode, player: Player): boolean => {
 
     // 3. Leaf Node
     if (!board.children) {
-        // If empty (value=null), we CAN win it.
-        // If taken by us, we CAN use it (already done).
-        // If taken by opponent, we CAN'T.
         return board.value === null || board.value === player;
     }
 
@@ -124,8 +121,7 @@ export const getWonDepth = (nodes: BoardNode[], depth: number): number => {
             // If node.winner was already set before, we wouldn't be playing here?
             // "nodes" contains the *new* state after modification.
             wonDepth = i;
-            continue; // Keep checking up? Standard TTT stops?
-            // Fractal TTT usually propagates.
+            continue;
         }
 
         // Check if now won
@@ -135,9 +131,7 @@ export const getWonDepth = (nodes: BoardNode[], depth: number): number => {
             node.winPattern = res.pattern;
             wonDepth = i;
         } else {
-            // Stop propagation if this level didn't win?
-            // If child won (wonDepth=i+1), does parent win?
-            // If parent didn't win, we stop.
+            // Stop propagation if this level didn't win
             break;
         }
     }
@@ -146,44 +140,8 @@ export const getWonDepth = (nodes: BoardNode[], depth: number): number => {
 
 // Calculate the Next Constraint based on where the win occurred
 export const getNextConstraint = (path: number[], wonDepth: number): number[] => {
-    // If wonDepth === path.length, it means no board was won (just the leaf filled).
-    // We SHOULD calculate the constraint typically (pointing to relative cell).
-    // if (wonDepth === path.length) return []; <--- REMOVED THIS BUG
-    // Wait, standard UTTT: Play in (x,y), next constraint is (x,y) in local sub.
-    // Logic in engine:
-    // nextC = pathIdxs.slice(0, d-2) + targetIndex?
-    // Engine logic:
-    /*
-        if (wonDepth > 0) {
-            const contextDepth = Math.max(0, wonDepth - 2);
-            const context = pathIdxs.slice(0, contextDepth);
-            const targetIndex = pathIdxs[wonDepth - 1]; // The board that WAS won?
-            nextC = [...context, targetIndex];
-        }
-    */
     if (wonDepth > 0) {
-        // wonDepth is the level that became won.
-        // e.g. wonDepth = d (Leaf level 4). Check formula.
-        // Engine: let wonDepth = d; if (i=d-1 won) wonDepth=i.
-        // If wonDepth <= d, it means a board at `wonDepth` changed state (Won).
-        // Actually, if wonDepth == d (Leaf), it means we just filled a leaf.
-        // No board won? Engine default `wonDepth = d`.
-
-        // If wonDepth == d: No *higher* board won.
-        // Next constraint is simply relative to the leaf?
-        // Engine logic seems to imply:
-        // If a board at level `k` is won, we are "sent" to the board at relative position `path[k]`.
-        // This is complex. Let's trust the Engine's current logic and copy it EXACTLY for now.
-
-        /*
-        if (wonDepth > 0) {
-           const contextDepth = Math.max(0, wonDepth - 2);
-           const context = pathIdxs.slice(0, contextDepth);
-           const targetIndex = pathIdxs[wonDepth - 1];
-           nextC = [...context, targetIndex];
-       }
-        */
-
+        // If a board at `wonDepth` was won, player is sent to the relative position in that board.
         const contextDepth = Math.max(0, wonDepth - 2);
         const context = path.slice(0, contextDepth);
         const targetIndex = path[wonDepth - 1];

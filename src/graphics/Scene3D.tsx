@@ -343,22 +343,34 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
         };
         animationId = requestAnimationFrame(animate);
 
-        // Resize
+        // Resize logic using ResizeObserver
         const handleResize = () => {
-            const w = window.innerWidth;
-            const h = window.innerHeight;
+            if (!mountRef.current || !rendererRef.current) return;
+
+            const w = mountRef.current.clientWidth;
+            const h = mountRef.current.clientHeight;
+
             renderer.setSize(w, h);
             updateCamera();
         };
 
-        window.addEventListener('resize', handleResize);
+        // Initial Resize
         handleResize();
+
+        const resizeObserver = new ResizeObserver(() => {
+            handleResize();
+        });
+
+        if (mountRef.current) {
+            resizeObserver.observe(mountRef.current);
+        }
 
         // Clean up
         const node = mountRef.current;
         return () => {
             cancelAnimationFrame(animationId);
-            window.removeEventListener('resize', handleResize);
+            resizeObserver.disconnect();
+
             window.removeEventListener('pointermove', handleInput);
             window.removeEventListener('wheel', handleInput);
             window.removeEventListener('pointerdown', handleInput);
