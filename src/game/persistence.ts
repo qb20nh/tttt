@@ -1,5 +1,4 @@
 import type { BoardNode, Player, Winner, GameMode } from './types';
-import { DEFAULT_DEPTH } from './constants';
 import { checkWin } from './logic';
 
 const KEY = 'ttt_fractal_state';
@@ -158,35 +157,43 @@ export function saveGameState(state: SavedState) {
         // Next: Game Mode
         // Next: Board Data as raw string
 
+        // 0: Player
+        // 1: Mode
+        // 2: Depth
+        // 3: Winner (New)
+        // 4: Constraint Len
+
         const header: number[] = [];
         header.push(state.currentPlayer === 'X' ? 0 : 1);
 
-        // Mode mapping: PvP=0, PvAI=1, AIvAI=2
-        let modeByte = 1; // Default PvAI
+        // Mode
+        let modeByte = 1;
         if (state.gameMode === 'PvP') modeByte = 0;
         else if (state.gameMode === 'AIvAI') modeByte = 2;
         header.push(modeByte);
 
-        // Depth
         header.push(state.depth);
+
+        // Winner Status
+        // 0=Null, 1=X, 2=O, 3=Draw
+        let winByte = 0;
+        if (state.winner === 'X') winByte = 1;
+        else if (state.winner === 'O') winByte = 2;
+        else if (state.winner === 'Draw') winByte = 3;
+        header.push(winByte);
 
         header.push(state.activeConstraint.length);
         state.activeConstraint.forEach(c => header.push(c));
 
-        // Convert to binary string
+        // ...
         let binaryString = "";
-        // Header
         header.forEach(b => binaryString += String.fromCharCode(b));
-        // Separator logic? No need, fixed header structure if we know length.
-        // But constraint length varies.
-
-        // Body
+        // ...
         for (let i = 0; i < compressed.length; i++) {
             binaryString += String.fromCharCode(compressed[i]);
         }
 
         localStorage.setItem(KEY, binaryString);
-        // console.log(`Saved: ${compressed.length} bytes (orig ${compacted.length})`);
     } catch (e) {
         console.error("Failed to save state", e);
     }
@@ -198,7 +205,6 @@ export function loadGameState(): SavedState | null {
         if (!data) return null;
 
         let ptr = 0;
-
         const playerByte = data.charCodeAt(ptr++);
         const currentPlayer: Player = playerByte === 0 ? 'X' : 'O';
 
@@ -207,33 +213,24 @@ export function loadGameState(): SavedState | null {
         if (modeByte === 0) gameMode = 'PvP';
         else if (modeByte === 2) gameMode = 'AIvAI';
 
-        // Peek constraint logic or depths?
-        // Old format didn't have depth. How to distinguish?
-        // Old format: Player, Mode, ConstraintLen...
-        // New format: Player, Mode, Depth, ConstraintLen...
-        // We can check if the 3rd byte is likely a depth (2,3,4) vs constraint len (0,1,2,3,4).
-        // Ambiguous if constraint len matches depth.
-        // Better: We are breaking save compatibility slightly.
-        // Assuming we reset or user accepts invalidation.
-
-        let depth = DEFAULT_DEPTH;
-
-        // Heuristic: Check byte at ptr.
-        // const nextByte = data.charCodeAt(ptr);
-
-        // If nextByte is 2-4 and NOT followed by indices...
-        // Constraint indices are 0-8.
-        // If we interpret as Depth, then next byte is constraint length.
-        // If we interpret as Constraint Length, then next 'length' bytes are indices.
-
-        // Let's assume new format. If parsing fails, return null.
-        depth = data.charCodeAt(ptr++);
+        const depth = data.charCodeAt(ptr++);
         if (depth < 2 || depth > 4) {
-            // Probably old format or invalid.
-            // Fallback to inferring?
-            // Let's force reset for safety in this migration.
+            // Basic validation failed, assume corrupted or old format
             return null;
         }
+
+        // Check for Winner Byte
+        // How to differentiate from Constraint len?
+        // Constraint len is usually 0, 1, 2...
+        // Format shift is tricky without versioning.
+        // We'll rely on the fact that existing saves (without winner) will likely fail structure check or we force reset.
+        // Since we are developing, clearing state is acceptable.
+
+        const winByte = data.charCodeAt(ptr++);
+        let winner: Winner = null;
+        if (winByte === 1) winner = 'X';
+        else if (winByte === 2) winner = 'O';
+        else if (winByte === 3) winner = 'Draw';
 
         const constraintLen = data.charCodeAt(ptr++);
         const activeConstraint: number[] = [];
@@ -247,10 +244,6 @@ export function loadGameState(): SavedState | null {
             bodyBytes[i] = bodyString.charCodeAt(i);
         }
 
-        // Decompress
-        // We need to know original compacted size? 
-        // 9^4 cells = 6561. 
-        // 4 cells per byte -> ceil(6561/4) = 1641 bytes.
         const TOTAL_CELLS = Math.pow(9, depth);
         const COMPACT_SIZE = Math.ceil(TOTAL_CELLS / 4);
 
@@ -258,22 +251,26 @@ export function loadGameState(): SavedState | null {
         const flat = uncompactBoard(compacted, TOTAL_CELLS);
         const { node } = reconstructBoard(flat, depth);
 
-        // Re-verify winners from bottom up?
-        // reconstructBoard already does checkWin recursively.
-
-        // Also restore winner if root is won
-        const rootRes = checkWin(node.children!);
-        const winner = rootRes ? rootRes.winner : null;
+        // Apply Explicit Winner
         if (winner) {
             node.winner = winner;
-            node.winPattern = rootRes!.pattern;
+        } else {
+            // Fallback: Check implicit winner
+            const rootRes = checkWin(node.children!);
+            if (rootRes) {
+                node.winner = rootRes.winner;
+                node.winPattern = rootRes.pattern;
+            }
         }
+
+        // Ensure the loaded winner matches the node winner
+        const finalWinner = node.winner;
 
         return {
             board: node,
             currentPlayer,
             activeConstraint,
-            winner,
+            winner: finalWinner,
             gameMode,
             depth
         };

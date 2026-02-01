@@ -2,7 +2,7 @@ import { Board } from './board';
 import { MoveGen } from './movegen';
 import { CELL_EMPTY, CELL_X, CELL_O } from './constants';
 import { tt } from './transposition';
-import { ZOBRIST_SIDE } from './zobrist';
+import { ZOBRIST_SIDE, ZOBRIST_CONSTRAINT } from './zobrist';
 
 // Global Move Stack (Pre-allocated)
 const MOVE_STACK = new Int32Array(50000);
@@ -13,28 +13,61 @@ export class Search {
     timeLimit = 1000;
     abort = false;
 
-    search(board: Board, player: number, maxDepth: number, timeout: number): { move: number, score: number, nodes: number } {
+    search(board: Board, player: number, maxDepth: number, timeout: number): { move: number, score: number, nodes: number, depth: number } {
         this.nodesVisited = 0;
         this.startTime = performance.now();
         this.timeLimit = timeout;
         this.abort = false;
 
+        // First Move Optimization: On empty board for D>=3, all positions are equivalent
+        // Return random move immediately to save compute time (D=2 is small enough to search)
+        if (board.depth >= 3 && this.isBoardEmpty(board)) {
+            const totalCells = board.leaves.length;
+            const randomMove = Math.floor(Math.random() * totalCells);
+            return { move: randomMove, score: 0, nodes: 0, depth: 0 };
+        }
+
         let bestScore = -Infinity;
         let bestMove = -1;
+        let completedDepth = 0;
 
         // Iterative Deepening
         for (let d = 1; d <= maxDepth; d++) {
-            const result = this.alphaBeta(board, player, d, -Infinity, Infinity, 0);
+            // Guarantee completion of Depth 1 by disabling timeout abort
+            const canAbort = d > 1;
+            const result = this.alphaBeta(board, player, d, -Infinity, Infinity, 0, canAbort);
 
             if (this.abort) break;
 
             bestScore = result.score;
             bestMove = result.move;
+            completedDepth = d;
 
             if (result.score > 90000) break;
         }
 
-        return { move: bestMove, score: bestScore, nodes: this.nodesVisited };
+        // Final Safety Check: If we somehow still have -1 (e.g. empty board loop?), try to find something.
+        // But D=1 guarantee should fix 99% of cases.
+        if (bestMove === -1) {
+            // Fallback: Just return ANY valid move if we have nothing.
+            // This prevents "No move" error.
+            const count = MoveGen.generate(board, MOVE_STACK, 0);
+            if (count > 0) {
+                // Pick random to avoid bias
+                const randIdx = Math.floor(Math.random() * count);
+                bestMove = MOVE_STACK[randIdx];
+            }
+        }
+
+        return { move: bestMove, score: bestScore, nodes: this.nodesVisited, depth: completedDepth };
+    }
+
+    // Check if board is completely empty (all leaves are CELL_EMPTY)
+    private isBoardEmpty(board: Board): boolean {
+        for (let i = 0; i < board.leaves.length; i++) {
+            if (board.leaves[i] !== CELL_EMPTY) return false;
+        }
+        return true;
     }
 
     alphaBeta(
@@ -43,11 +76,12 @@ export class Search {
         depth: number,
         alpha: number,
         beta: number,
-        stackOffset: number
+        stackOffset: number,
+        canAbort: boolean
     ): { score: number, move: number } {
 
         this.nodesVisited++;
-        if ((this.nodesVisited & 4095) === 0) {
+        if (canAbort && (this.nodesVisited & 65535) === 0) {
             if (performance.now() - this.startTime > this.timeLimit) {
                 this.abort = true;
             }
@@ -58,7 +92,11 @@ export class Search {
         let currentHash = board.hash;
         if (player === CELL_O) currentHash ^= ZOBRIST_SIDE;
 
-        currentHash ^= BigInt(board.constraint + 2);
+        // Use proper Zobrist for constraint
+        // Constraint range: -1 (free) to 729 (9^3 for D=4), so +1 gives 0-730
+        // Mask to 0-1023 ensures safe array indexing (ZOBRIST_CONSTRAINT has 1024 entries)
+        const constraintIdx = ((board.constraint + 1) & 1023);
+        currentHash ^= ZOBRIST_CONSTRAINT[constraintIdx];
 
         const ttEntry = tt.get(currentHash);
         if (ttEntry && ttEntry.depth >= depth) {
@@ -132,7 +170,7 @@ export class Search {
                 board.constraintLayer = targetLayer;
             }
 
-            const result = this.alphaBeta(board, opponent, depth - 1, -beta, -alpha, stackOffset + count);
+            const result = this.alphaBeta(board, opponent, depth - 1, -beta, -alpha, stackOffset + count, canAbort);
             const score = -result.score;
 
             // Revert

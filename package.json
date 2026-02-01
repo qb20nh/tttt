@@ -1,5 +1,5 @@
 {
-  "name": "ttt",
+  "name": "tttt",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -19,6 +19,7 @@
     "lucide-react": "^0.563.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-router-dom": "^7.13.0",
     "tailwindcss": "^4.1.18",
     "three": "^0.182.0"
   },

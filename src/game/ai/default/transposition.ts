@@ -8,33 +8,54 @@ export interface TTEntry {
 }
 
 export class TT {
-    table: Map<bigint, TTEntry>;
+    front: Map<bigint, TTEntry>;
+    back: Map<bigint, TTEntry>;
+    limit: number;
 
-    constructor() {
-        this.table = new Map();
+    constructor(limit = 4194304) { // Limit ~4M per map => ~8M total max (Safe)
+        this.front = new Map();
+        this.back = new Map();
+        this.limit = limit;
     }
 
     put(hash: bigint, depth: number, score: number, flag: TTFlag, bestMove: number) {
-        // Replacement strategy: Always replace?
-        // Or prefer deeper entries?
+        // Replacement strategy: Depth Priority?
+        // For now, we overwrite in front.
 
-        // const existing = this.table.get(hash);
-        // if (existing && existing.depth > depth) return; // Keep deeper
+        // Check if front is full
+        if (this.front.size >= this.limit) {
+            // Swap: back becomes the old front
+            this.back = this.front;
+            this.front = new Map();
+        }
 
-        // For TTT, simple replace is often fine or "Depth Priority"
-        this.table.set(hash, { depth, score, flag, bestMove });
+        this.front.set(hash, { depth, score, flag, bestMove });
     }
 
     get(hash: bigint): TTEntry | undefined {
-        return this.table.get(hash);
+        // Check front first
+        let entry = this.front.get(hash);
+        if (entry) return entry;
+
+        // Check back
+        entry = this.back.get(hash);
+        if (entry) {
+            // Promote to front (LRU behavior)
+            this.front.set(hash, entry);
+            this.back.delete(hash);
+            return entry;
+        }
+
+        return undefined;
     }
 
     clear() {
-        this.table.clear();
+        this.front.clear();
+        this.back.clear();
     }
 
     size() {
-        return this.table.size;
+        return this.front.size + this.back.size;
     }
 }
 

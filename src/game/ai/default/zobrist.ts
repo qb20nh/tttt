@@ -17,3 +17,13 @@ for (let i = 0; i < ZOBRIST_TABLE.length; i++) {
 }
 
 export const ZOBRIST_SIDE = rand64();
+
+// Zobrist table for constraint values
+// Max constraint index for D=4 at layer D-1 is 9^(D-1) = 729
+// At layer D-2: 9^(D-2) = 81, etc.
+// We use modulo to map any constraint to a fixed range for hashing
+export const ZOBRIST_CONSTRAINT_SIZE = 1024; // Power of 2 for fast modulo
+export const ZOBRIST_CONSTRAINT = new BigUint64Array(ZOBRIST_CONSTRAINT_SIZE);
+for (let i = 0; i < ZOBRIST_CONSTRAINT.length; i++) {
+    ZOBRIST_CONSTRAINT[i] = rand64();
+}

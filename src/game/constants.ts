@@ -7,6 +7,13 @@ export const WIN_PATTERNS = [
     [0, 4, 8], [2, 4, 6]
 ];
 
+// AI search depth based on board depth (Single Source of Truth)
+export const getSearchDepth = (boardDepth: number): number => {
+    if (boardDepth === 2) return 8;
+    if (boardDepth === 3) return 6;
+    return 4; // D=4
+};
+
 // --- Constants for Layout ---
 export const BASE_GAP = 0.000625;
 export const OUTER_GAP = 5.0 * BASE_GAP;

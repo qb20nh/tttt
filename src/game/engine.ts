@@ -1,22 +1,18 @@
 import { useState, useEffect, useRef } from 'react';
 import type { BoardNode, Player, Winner, GameMode } from './types';
-import { DEFAULT_DEPTH } from './constants';
-import { checkWin, generateBoard, isFull, canWin } from './logic';
+import { DEFAULT_DEPTH, getSearchDepth } from './constants';
+import { generateBoard, isFull, canWin, isValidPath, getPathFromCoordinates, getWonDepth, getNextConstraint } from './logic';
 import { loadGameState, saveGameState, clearSavedState } from './persistence';
 
-declare global {
-    interface Window {
-        runAiBenchmark: () => void;
-    }
-}
 
-export const useGameState = (initialDepth: number = DEFAULT_DEPTH) => {
+export const useGameState = (initialDepth: number = DEFAULT_DEPTH, isPlaying: boolean = true) => {
     // Load saved state once on mount
     const [savedState] = useState(() => loadGameState());
 
     const [depth, setDepth] = useState(savedState?.depth || initialDepth);
     const [board, setBoard] = useState<BoardNode>(() => {
-        if (savedState && savedState.depth === (savedState.depth || DEFAULT_DEPTH)) {
+        // Only restore saved board if depth matches
+        if (savedState && savedState.depth === initialDepth) {
             return savedState.board;
         }
         return generateBoard(initialDepth);
@@ -37,28 +33,19 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH) => {
     }
 
 
-    const workerRef = useRef<Worker | null>(null);
+    const workerX = useRef<Worker | null>(null);
+    const workerO = useRef<Worker | null>(null);
 
-    // Initialize Worker
+    // Initialize Workers
     useEffect(() => {
-        workerRef.current = new Worker(new URL('./ai/worker.ts', import.meta.url), { type: 'module' });
+        const createWorker = () => new Worker(new URL('./ai/worker.ts', import.meta.url), { type: 'module' });
 
-        workerRef.current.onmessage = (e) => {
-            const { type, result } = e.data;
-            if (type === 'result' && result && result.move.length > 0) {
-                // Convert path to grid coordinates
-                // We need to use the current 'depth' to reconstruct.
-                // Assuming result.move is [p0, p1, ... p(d-1)]
-
-                // We need access to current 'depth' in closure. 
-                // We use generic scales reconstruction.
-                // But wait, the closure captures old depth if we don't be careful.
-                // We will use 'latestState' ref pattern as before.
-            }
-        };
+        workerX.current = createWorker();
+        workerO.current = createWorker();
 
         return () => {
-            workerRef.current?.terminate();
+            workerX.current?.terminate();
+            workerO.current?.terminate();
         };
     }, []);
 
@@ -72,6 +59,7 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH) => {
     // Trigger AI
     const aiStartTimeRef = useRef<number>(0);
     useEffect(() => {
+        if (!isPlaying) return; // Block AI if on Home Screen
         if (winner || isAiThinking) return;
 
         let shouldTriggerAI = false;
@@ -86,49 +74,39 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH) => {
             setIsAiThinking(true);
             aiStartTimeRef.current = performance.now();
 
-            // Dynamic Search Depth
-            // Depth 2: Small board (9 cells * 9). Global search is feasible.
-            // Depth 3: Medium. 
-            // Depth 4: Large.
+            const searchDepth = getSearchDepth(depth);
 
-            let searchDepth = 0;
-            if (depth === 2) searchDepth = 16;
-            if (depth === 3) searchDepth = 14;
-            if (depth === 4) searchDepth = 12;
+            let targetWorker: Worker | null = null;
+            if (gameMode === 'PvAI' && currentPlayer === 'O') {
+                targetWorker = workerO.current;
+            } else if (gameMode === 'AIvAI') {
+                targetWorker = currentPlayer === 'X' ? workerX.current : workerO.current;
+            }
 
-            workerRef.current?.postMessage({
+            targetWorker?.postMessage({
                 type: 'search',
                 board,
                 player: currentPlayer,
                 constraint: activeConstraint,
                 config: {
-                    maxTime: 1000,
+                    maxTime: 12000,
                     maxDepth: searchDepth, // Search depth (not board depth)
                     boardDepth: depth // Actual board depth
                 }
             });
         }
-    }, [currentPlayer, winner, board, activeConstraint, gameMode, depth, isAiThinking]);
+    }, [currentPlayer, winner, board, activeConstraint, gameMode, depth, isAiThinking, isPlaying]);
 
 
     const handleMoveInternal = (gridX: number, gridY: number, currentBoard: BoardNode, currentC: number[], currentP: Player, currentW: Winner, d: number) => {
         if (currentW) return null;
 
-        // 1. Decompose Coordinates
-        const pathIdxs: number[] = [];
-        let remX = gridX;
-        let remY = gridY;
+        // 1. Decompose Coordinates & Path Validity
+        const pathIdxs = getPathFromCoordinates(gridX, gridY, d);
 
-        for (let i = 0; i < d; i++) {
-            const scale = Math.pow(3, d - 1 - i);
-            const x = Math.floor(remX / scale);
-            const y = Math.floor(remY / scale);
-            pathIdxs.push(y * 3 + x);
-            remX %= scale;
-            remY %= scale;
-        }
+        // 2. Check Constraint & Path Validity
+        if (!isValidPath(currentBoard, pathIdxs)) return null;
 
-        // 2. Check Constraint
         if (currentC.length > 0) {
             // Constraint length is usually d-1 or less
             for (let i = 0; i < currentC.length; i++) {
@@ -156,55 +134,10 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH) => {
         leaf.value = currentP;
 
         // 5. Check Wins (Bottom Up)
-        // nodes has [Root, L1, L2, ... L(d-1)] (Length d)
-        // We verified leaf parent winner above.
-
-        let wonDepth = d; // Default: we just "won" (filled) the leaf level (d)
-
-        const checkWinAndPropagate = (node: BoardNode) => {
-            const res = node.children ? checkWin(node.children) : null;
-            if (res && !node.winner) {
-                node.winner = res.winner;
-                node.winPattern = res.pattern;
-                return true;
-            }
-            return false;
-        };
-
-        // Iterate from Leaf Parent (d-1) up to Root (0)
-        // nodes[d-1] is Leaf Parent.
-
-        for (let i = d - 1; i >= 0; i--) {
-            const node = nodes[i];
-            // Check if this node became won
-            if (checkWinAndPropagate(node)) {
-                // If node i is won, it means the effective move is at depth i
-                // (e.g. if LeafParent (d-1) is won, effectively we played a move in node (d-2))
-                wonDepth = i;
-            } else {
-                // Determine if we stop? 
-                // In standard TTT, if we win a sub-board, we check parent.
-                // If parent NOT won, we stop propagating win check.
-                // But we still track 'wonDepth' because the constraint depends on the highest level change.
-                break;
-            }
-        }
+        const wonDepth = getWonDepth(nodes, d);
 
         // 6. Next Constraint
-        // Generalized Fractal UTTT Logic:
-        // We preserve the "context" (prefix) of the board we are currently playing in,
-        // and append the "relative move" (suffix) to target the next sibling in that context.
-        // If a board is won (wonDepth < d), the "move" is the winning board itself,
-        // and the "context" shrinks to the parent scope.
-        // Formula: context = path.slice(0, wonDepth - 2) + [path[wonDepth - 1]]
-
-        let nextC: number[] = [];
-        if (wonDepth > 0) {
-            const contextDepth = Math.max(0, wonDepth - 2);
-            const context = pathIdxs.slice(0, contextDepth);
-            const targetIndex = pathIdxs[wonDepth - 1];
-            nextC = [...context, targetIndex];
-        }
+        const nextC = getNextConstraint(pathIdxs, wonDepth);
 
         // 7. Playability Check (if constraint target is full/won OR inside won parent)
         const isPlayable = (targetPath: number[]) => {
@@ -270,7 +203,8 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH) => {
         clearSavedState();
 
         // Clear AI memory
-        workerRef.current?.postMessage({ type: 'clear' });
+        workerX.current?.postMessage({ type: 'clear' });
+        workerO.current?.postMessage({ type: 'clear' });
 
         const d = newDepth !== undefined ? newDepth : depth;
         // Update depth state effectively?
@@ -284,22 +218,12 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH) => {
         if (newMode) setGameMode(newMode);
     };
 
+
     // Handle AI Worker Response (Placed here to access handleMoveInternal)
     useEffect(() => {
-        if (!workerRef.current) return;
+        if (!workerX.current || !workerO.current) return;
 
-        window.runAiBenchmark = () => {
-            console.log("Starting 2s Benchmark...");
-            workerRef.current?.postMessage({
-                type: 'benchmark',
-                board: latestState.current.board,
-                player: latestState.current.currentPlayer,
-                constraint: latestState.current.activeConstraint,
-                config: { maxTime: 2000, maxDepth: 8, boardDepth: latestState.current.depth }
-            });
-        };
-
-        workerRef.current.onmessage = async (e) => {
+        const handleWorkerMessage = async (e: MessageEvent) => {
             const { type, result } = e.data;
 
             if (type === 'benchmark_result') {
@@ -318,6 +242,12 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH) => {
                 const remaining = Math.max(0, minDelay - elapsed);
 
                 setTimeout(() => {
+                    if (!result.move || result.move.length === 0) {
+                        console.warn("AI returned no move.");
+                        setIsAiThinking(false);
+                        return;
+                    }
+
                     let gx = 0;
                     let gy = 0;
                     for (let i = 0; i < d; i++) {
@@ -336,12 +266,18 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH) => {
                         const update = handleMoveInternal(gx, gy, current.board, current.activeConstraint, current.currentPlayer, current.winner, d);
                         if (update) {
                             applyMove(update);
+                        } else {
+                            console.error("AI returned invalid move:", gx, gy, "Constraint:", current.activeConstraint);
                         }
                     }
                     setIsAiThinking(false);
                 }, remaining);
             }
         };
+
+        workerX.current.onmessage = handleWorkerMessage;
+        workerO.current.onmessage = handleWorkerMessage;
+
     }, []);
 
     // Persistence

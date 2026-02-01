@@ -7,9 +7,10 @@ interface HomeScreenProps {
     onStartGame: (mode: GameMode, depth: number) => void;
     hasSavedGame: boolean;
     onResumeGame: () => void;
+    onShowIntro: () => void;
 }
 
-export const HomeScreen = ({ onStartGame, hasSavedGame, onResumeGame }: HomeScreenProps) => {
+export const HomeScreen = ({ onStartGame, hasSavedGame, onResumeGame, onShowIntro }: HomeScreenProps) => {
     const [selectedDepth, setSelectedDepth] = useState(DEFAULT_DEPTH);
 
     // Filter available depths (2, 3, 4)
@@ -110,8 +111,17 @@ export const HomeScreen = ({ onStartGame, hasSavedGame, onResumeGame }: HomeScre
             </div>
 
             {/* Footer */}
-            <div className="absolute bottom-8 text-slate-600 text-sm">
-                v1.2 • Adjustable Recursion
+            <div className="absolute bottom-8 flex flex-col items-center gap-4">
+                <button
+                    onClick={onShowIntro}
+                    className="w-10 h-10 rounded-full border border-slate-700 bg-slate-900/50 text-slate-400 hover:text-white hover:border-cyan-500/50 hover:bg-slate-800 transition-all flex items-center justify-center font-bold text-lg cursor-pointer"
+                    title="How to Play"
+                >
+                    ?
+                </button>
+                <div className="text-slate-600 text-sm">
+                    v1.2 • Adjustable Recursion
+                </div>
             </div>
         </div>
     );

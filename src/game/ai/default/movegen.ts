@@ -57,24 +57,26 @@ export class MoveGen {
             if (board.leaves[i] === CELL_EMPTY) {
                 // If Global Search (or Constraint Invalidated), we must check ancestry playability.
                 if (!validSubboard) {
-                    // We need to check if ANY ancestor from Root down to LeafParent is Won/Full.
-                    // This is expensive?
-                    // Optimization: We check top-down or bottom-up?
-                    // Check Leaf Parent first (most likely to be full).
+                    // Check all ancestors from leaf parent up to root
+                    let ancestorIdx = i;
+                    let skipTo = -1;
 
-                    const pIdx = (i / 9) >>> 0;
-                    if (MoveGen.isNodeFullOrWon(board, D - 1, pIdx)) {
-                        i = (pIdx + 1) * 9 - 1; continue;
-                    }
-
-                    if (D > 1) {
-                        const ppIdx = (pIdx / 9) >>> 0;
-                        if (MoveGen.isNodeFullOrWon(board, D - 2, ppIdx)) {
-                            // Skip 81
-                            i = (ppIdx + 1) * 81 - 1; continue;
+                    for (let layer = D - 1; layer >= 0; layer--) {
+                        ancestorIdx = (ancestorIdx / 9) >>> 0;
+                        if (MoveGen.isNodeFullOrWon(board, layer, ancestorIdx)) {
+                            // Skip all leaves under this won/full ancestor
+                            const power = D - layer;
+                            let skipSize = 1;
+                            for (let k = 0; k < power; k++) skipSize *= 9;
+                            skipTo = (ancestorIdx + 1) * skipSize - 1;
+                            break;
                         }
                     }
-                    // Handle deeper recursion generic loop if needed
+
+                    if (skipTo !== -1) {
+                        i = skipTo;
+                        continue;
+                    }
                 }
 
                 outArray[offset + count] = i;

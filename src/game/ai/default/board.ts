@@ -115,18 +115,26 @@ export class Board {
     public evaluate(player: number): number {
         let score = 0;
 
-        // Depth 0 (Root): Weight 10000
-        score += LUT_SCORE_BASE4[this.keys[0][0]] * 10000;
+        // Evaluate all layers with diminishing weights
+        // Weights are chosen so total heuristic stays well below 90000 (terminal win threshold)
+        // Layer 0 (Root): Weight 100
+        // Layer 1: Weight 10
+        // Layer 2: Weight 1
+        // Layer 3+: Weight 1
 
-        // Simplistic Sum
-        // Ideally we iterate deeper layers.
-        // For D=2, add L1 scores.
-        if (this.depth > 1) {
-            const l1 = this.keys[1];
-            for (let i = 0; i < l1.length; i++) {
-                score += LUT_SCORE_BASE4[l1[i]]; // Weight 1
+        let weight = 1000;
+        for (let d = 0; d < this.depth; d++) {
+            const layer = this.keys[d];
+            for (let i = 0; i < layer.length; i++) {
+                score += LUT_SCORE_BASE4[layer[i]] * weight;
             }
+            weight = Math.floor(weight / 10);
+            if (weight < 1) weight = 1;
         }
+
+        // Cap heuristic to ensure it never exceeds terminal win detection threshold
+        const MAX_HEURISTIC = 50000;
+        score = Math.max(-MAX_HEURISTIC, Math.min(MAX_HEURISTIC, score));
 
         if (player === CELL_O) return -score;
         return score;
