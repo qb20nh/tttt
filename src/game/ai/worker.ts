@@ -9,6 +9,7 @@ import { isValidPath } from '../logic';
 type WorkerMessage =
     | {
         type: 'search';
+        id: number;
         board: BoardNode;
         player: Player;
         constraint: number[];
@@ -30,7 +31,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
     const msg = e.data;
 
     if (msg.type === 'search') {
-        const { board: boardNode, player, constraint, config } = msg;
+        const { board: boardNode, player, constraint, config, id } = msg; // Extract ID
         try {
             // Apply Random Symmetry
             const symIdx = getRandomSymmetry();
@@ -100,21 +101,23 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
                 }
                 self.postMessage({
                     type: 'result',
+                    id, // Echo ID
                     result: {
                         move: bestPath,
                         score: fallbackResult.score,
-                        depth: fallbackResult.depth, // Actual depth achieved
-                        nodes: result.nodes + fallbackResult.nodes, // Total nodes from both searches
+                        depth: fallbackResult.depth,
+                        nodes: result.nodes + fallbackResult.nodes,
                         time: 0
                     }
                 });
             } else {
                 self.postMessage({
                     type: 'result',
+                    id, // Echo ID
                     result: {
                         move: finalPath,
                         score: result.score,
-                        depth: result.depth, // Actual depth achieved
+                        depth: result.depth,
                         nodes: result.nodes,
                         time: 0
                     }
@@ -125,6 +128,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
             // Return empty result to unblock engine
             self.postMessage({
                 type: 'result',
+                id, // Echo ID
                 result: {
                     move: [],
                     score: 0,

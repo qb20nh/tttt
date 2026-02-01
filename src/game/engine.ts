@@ -58,6 +58,8 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH, isPlaying: bo
 
     // Trigger AI
     const aiStartTimeRef = useRef<number>(0);
+    const searchIdRef = useRef<number>(0); // Unique ID for each search request
+
     useEffect(() => {
         if (!isPlaying) return; // Block AI if on Home Screen
         if (winner || isAiThinking) return;
@@ -73,6 +75,8 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH, isPlaying: bo
             // eslint-disable-next-line
             setIsAiThinking(true);
             aiStartTimeRef.current = performance.now();
+            searchIdRef.current += 1; // Increment ID
+            const currentSearchId = searchIdRef.current;
 
             const searchDepth = getSearchDepth(depth);
 
@@ -85,6 +89,7 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH, isPlaying: bo
 
             targetWorker?.postMessage({
                 type: 'search',
+                id: currentSearchId, // Send ID
                 board,
                 player: currentPlayer,
                 constraint: activeConstraint,
@@ -206,6 +211,9 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH, isPlaying: bo
         workerX.current?.postMessage({ type: 'clear' });
         workerO.current?.postMessage({ type: 'clear' });
 
+        // Invalidate pending searches by incrementing ID
+        searchIdRef.current += 1;
+
         const d = newDepth !== undefined ? newDepth : depth;
         // Update depth state effectively?
         if (newDepth !== undefined) setDepth(newDepth);
@@ -224,7 +232,7 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH, isPlaying: bo
         if (!workerX.current || !workerO.current) return;
 
         const handleWorkerMessage = async (e: MessageEvent) => {
-            const { type, result } = e.data;
+            const { type, result, id } = e.data; // Extract ID
 
             if (type === 'benchmark_result') {
                 console.table(result);
@@ -233,6 +241,12 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH, isPlaying: bo
             }
 
             if (type === 'result') {
+                // ID Validation: If ID mismatches, discard
+                if (id !== searchIdRef.current) {
+                    console.warn("Discarding stale AI result", id, "Expected:", searchIdRef.current);
+                    return;
+                }
+
                 const current = latestState.current;
                 const d = current.depth;
 
@@ -242,6 +256,9 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH, isPlaying: bo
                 const remaining = Math.max(0, minDelay - elapsed);
 
                 setTimeout(() => {
+                    // Double check ID again in case reset happened during timeout
+                    if (id !== searchIdRef.current) return;
+
                     if (!result.move || result.move.length === 0) {
                         console.warn("AI returned no move.");
                         setIsAiThinking(false);
