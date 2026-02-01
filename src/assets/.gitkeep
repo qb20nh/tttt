@@ -1,0 +1,3 @@
+# Files in this directory are part of the module graph.
+# They ARE processed, optimized, and hashed by Vite during the build.
+# Use this for UI images, fonts, and CSS that should benefit from cache-busting.

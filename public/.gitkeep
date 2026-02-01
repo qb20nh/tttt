@@ -1,0 +1,3 @@
+# Files in this directory are served at the root path (/).
+# They are NOT processed by Vite/Rollup and are copied as-is to 'dist'.
+# Use this for assets that don't need versioning or hashing (e.g., robots.txt).
