@@ -1,24 +1,25 @@
-import { useRef, useEffect, useState, useCallback, useImperativeHandle } from 'react';
+import { useRef, useEffect, useState, useCallback, useImperativeHandle, useLayoutEffect } from 'react';
 import {
     WebGLRenderer,
     Scene,
     OrthographicCamera,
     ShaderMaterial,
     DataTexture,
-    FloatType,
-    NearestFilter,
-    RGBAFormat,
-    Vector2,
     Vector4,
-    PlaneGeometry,
-    Mesh,
     MathUtils
 } from 'three';
 import type Stats from 'stats.js';
 import type { BoardNode, Player, Winner } from '../game/types';
 import { BOARD_SIZE } from '../game/constants';
-import { vertexShader, fragmentShader } from './shaders';
 import { getConstraintRect, mapUVToCell } from './layout';
+import { getRenderer } from './renderer';
+import {
+    createGameCamera,
+    createGameTexture,
+    createGameMaterial,
+    createGameScene,
+    createGameMesh
+} from './setup';
 
 export interface Scene3DHandle {
     zoomIn: () => void;
@@ -176,57 +177,47 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
     }, [board, depth]);
 
     // --- Initialization ---
-    useEffect(() => {
+    // Use useLayoutEffect to attach renderer BEFORE paint
+    useLayoutEffect(() => {
         if (!mountRef.current) return;
 
+
         // Renderer
-        const renderer = new WebGLRenderer({
-            antialias: true,
-            powerPreference: 'high-performance',
-            preserveDrawingBuffer: true,
-        });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        // Use Singleton Renderer to ensure shader cache sharing with prewarm
+        const renderer = getRenderer();
+
+        // Ensure we are attached
+        if (!mountRef.current.contains(renderer.domElement)) {
+            // If checking fails, just append. 
+            // Better: clear first?
+            mountRef.current.innerHTML = '';
+            mountRef.current.appendChild(renderer.domElement);
+        }
+
+        // Update size immediately
         renderer.setSize(window.innerWidth, window.innerHeight);
-        mountRef.current.appendChild(renderer.domElement);
         rendererRef.current = renderer;
 
+
         // Scene & Cam
-        const scene = new Scene();
+        const scene = createGameScene();
         sceneRef.current = scene;
-        const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
-        camera.position.z = 1;
+        const camera = createGameCamera();
         cameraRef.current = camera;
 
         // State Texture
-        const size = BOARD_SIZE * BOARD_SIZE;
-        const data = new Float32Array(size * 4);
-        const texture = new DataTexture(data, BOARD_SIZE, BOARD_SIZE, RGBAFormat, FloatType);
-        texture.magFilter = NearestFilter;
-        texture.minFilter = NearestFilter;
-        texture.needsUpdate = true;
+        const texture = createGameTexture();
         textureRef.current = texture;
 
         // Material
         const initialPlayerVal = currentPlayer === 'X' ? 0 : 1;
         const initialConstraint = getConstraintRect(activeConstraint, depth);
-        const material = new ShaderMaterial({
-            vertexShader,
-            fragmentShader,
-            uniforms: {
-                uStateTexture: { value: texture },
-                uHover: { value: new Vector2(-1, -1) },
-                uConstraint: { value: new Vector4(initialConstraint.x, initialConstraint.y, initialConstraint.w, initialConstraint.h) },
-                uPlayer: { value: initialPlayerVal },
-                uTime: { value: 0 },
-                uDepth: { value: depth }
-            },
-        });
+        const material = createGameMaterial(texture, depth, initialPlayerVal, initialConstraint);
         materialRef.current = material;
         playerValRef.current = initialPlayerVal; // Sync ref too
 
         // Geometry
-        const geometry = new PlaneGeometry(2, 2);
-        const mesh = new Mesh(geometry, material);
+        const { mesh, geometry } = createGameMesh(material);
         scene.add(mesh);
         // Loop Logic
         let lastTime = performance.now();
@@ -378,11 +369,18 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
             document.body.removeEventListener('pointerenter', handleEnter);
             document.body.removeEventListener('pointerleave', handleLeave);
 
-            renderer.dispose();
+            // DO NOT dispose renderer (Singleton).
+            // Just remove from DOM.
+            if (node && renderer.domElement) {
+                if (node.contains(renderer.domElement)) {
+                    node.removeChild(renderer.domElement);
+                }
+            }
+
+            // Dispose scene resources
             texture.dispose();
             material.dispose();
             geometry.dispose();
-            if (node) node.removeChild(renderer.domElement);
         };
     }, [updateCamera, statsInstance]); // eslint-disable-line react-hooks/exhaustive-deps
     // Actually, if depth changes, material needs update for uDepth.

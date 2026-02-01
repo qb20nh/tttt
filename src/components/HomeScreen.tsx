@@ -10,7 +10,12 @@ interface HomeScreenProps {
     onShowIntro: () => void;
 }
 
+import { useShaderPrewarm } from '../graphics/prewarm';
+
 export const HomeScreen = ({ onStartGame, hasSavedGame, onResumeGame, onShowIntro }: HomeScreenProps) => {
+    // Prewarm shaders asynchronously when on Home Screen
+    useShaderPrewarm();
+
     const [selectedDepth, setSelectedDepth] = useState(DEFAULT_DEPTH);
 
     // Filter available depths (2, 3, 4)
