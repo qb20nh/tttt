@@ -56,27 +56,37 @@ export class MoveGen {
             // Check if leaf is empty
             if (board.leaves[i] === CELL_EMPTY) {
                 // If Global Search (or Constraint Invalidated), we must check ancestry playability.
-                if (!validSubboard) {
-                    // Check all ancestors from leaf parent up to root
-                    let ancestorIdx = i;
-                    let skipTo = -1;
+                // Check ancestry playability (Intermediate Constraints)
+                // Even if the constrained board itself is valid, recursive sub-boards within it might be won.
+                // We must check ancestors from Leaf Parent up to the Constraint Layer (exclusive).
+                const checkLimit = validSubboard ? (constraintLayer + 1) : 0;
 
-                    for (let layer = D - 1; layer >= 0; layer--) {
-                        ancestorIdx = (ancestorIdx / 9) >>> 0;
-                        if (MoveGen.isNodeFullOrWon(board, layer, ancestorIdx)) {
-                            // Skip all leaves under this won/full ancestor
-                            const power = D - layer;
-                            let skipSize = 1;
-                            for (let k = 0; k < power; k++) skipSize *= 9;
-                            skipTo = (ancestorIdx + 1) * skipSize - 1;
-                            break;
-                        }
-                    }
+                let ancestorIdx = i;
+                let skipTo = -1;
 
-                    if (skipTo !== -1) {
-                        i = skipTo;
-                        continue;
+                for (let layer = D - 1; layer >= checkLimit; layer--) {
+                    ancestorIdx = (ancestorIdx / 9) >>> 0;
+                    if (MoveGen.isNodeFullOrWon(board, layer, ancestorIdx)) {
+                        // Skip all leaves under this won/full ancestor
+                        const power = D - layer;
+                        let skipSize = 1; // 9^0
+                        for (let k = 0; k < power; k++) skipSize *= 9;
+
+                        // Calculate the last leaf index under this invalid ancestor
+                        // ancestorIdx is the index at 'layer'.
+                        // We want the last leaf.
+                        // Wait. skipSize calculation above seems to be 9^(D-layer).
+                        // If layer = D-1. power = 1. skipSize = 9.
+                        // (ancestorIdx + 1) * 9 - 1. Correct.
+
+                        skipTo = (ancestorIdx + 1) * skipSize - 1;
+                        break;
                     }
+                }
+
+                if (skipTo !== -1) {
+                    i = skipTo;
+                    continue;
                 }
 
                 outArray[offset + count] = i;
