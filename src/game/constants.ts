@@ -1,5 +1,5 @@
 // --- Game Logic Constants ---
-export const DEFAULT_DEPTH = 4;
+export const DEFAULT_DEPTH = 2;
 export const MAX_DEPTH = 4;
 export const WIN_PATTERNS = [
     [0, 1, 2], [3, 4, 5], [6, 7, 8],
@@ -9,7 +9,7 @@ export const WIN_PATTERNS = [
 
 // AI search depth based on board depth (Single Source of Truth)
 export const getSearchDepth = (boardDepth: number): number => {
-    if (boardDepth == 4) return 12;
+    if (boardDepth === 4) return 12;
     return 14;
 };
 

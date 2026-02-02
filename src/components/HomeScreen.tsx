@@ -32,7 +32,7 @@ export const HomeScreen = ({ onStartGame, hasSavedGame, onResumeGame, onShowIntr
                         FRACTAL TTT
                     </h1>
                     <p className="text-slate-400 text-xl md:text-2xl font-light tracking-wide">
-                        Recursive Strategy. Infinite Depth.
+                        Multiscale Strategy. Nested Complexity.
                     </p>
                 </div>
 
@@ -50,7 +50,7 @@ export const HomeScreen = ({ onStartGame, hasSavedGame, onResumeGame, onShowIntr
                                 className={`
                                     w-12 h-12 rounded-lg font-bold text-lg transition-all duration-200 cursor-pointer
                                     ${selectedDepth === depth
-                                        ? 'bg-cyan-500 text-black shadow-[0_0_15px_rgba(34,211,238,0.4)] scale-110'
+                                        ? 'bg-cyan-500 text-black shadow-[0_0_15px_rgba(34,211,238,0.4)]'
                                         : 'bg-slate-800 text-slate-500 hover:bg-slate-700 hover:text-slate-300'}
                                 `}
                             >
@@ -84,7 +84,7 @@ export const HomeScreen = ({ onStartGame, hasSavedGame, onResumeGame, onShowIntr
                             <div className="absolute inset-0 bg-gradient-to-br from-rose-500/10 to-transparent opacity-0 group-hover:opacity-100 rounded-2xl transition-opacity" />
                             <Bot className="w-12 h-12 text-rose-500 mb-4 group-hover:scale-110 transition-transform" />
                             <h3 className="text-2xl font-bold text-white mb-2">Vs A.I.</h3>
-                            <p className="text-slate-400 text-sm">Challenge the recursive engine</p>
+                            <p className="text-slate-400 text-sm">Challenge the strategic engine</p>
                         </div>
                     </button>
 
@@ -97,7 +97,7 @@ export const HomeScreen = ({ onStartGame, hasSavedGame, onResumeGame, onShowIntr
                             <div className="absolute inset-0 bg-gradient-to-br from-purple-500/10 to-transparent opacity-0 group-hover:opacity-100 rounded-2xl transition-opacity" />
                             <MonitorPlay className="w-12 h-12 text-purple-500 mb-4 group-hover:scale-110 transition-transform" />
                             <h3 className="text-2xl font-bold text-white mb-2">Spectate</h3>
-                            <p className="text-slate-400 text-sm">Watch AI vs AI infinite battle</p>
+                            <p className="text-slate-400 text-sm">Watch an automated duel</p>
                         </div>
                     </button>
                 </div>
@@ -116,7 +116,7 @@ export const HomeScreen = ({ onStartGame, hasSavedGame, onResumeGame, onShowIntr
             </div>
 
             {/* Footer */}
-            <div className="absolute bottom-8 flex flex-col items-center gap-4">
+            <div className="absolute bottom-2 flex flex-col items-center gap-2">
                 <button
                     onClick={onShowIntro}
                     className="w-10 h-10 rounded-full border border-slate-700 bg-slate-900/50 text-slate-400 hover:text-white hover:border-cyan-500/50 hover:bg-slate-800 transition-all flex items-center justify-center font-bold text-lg cursor-pointer"
@@ -124,7 +124,7 @@ export const HomeScreen = ({ onStartGame, hasSavedGame, onResumeGame, onShowIntr
                 >
                     ?
                 </button>
-                <div className="text-slate-600 text-sm">
+                <div className="text-slate-600 text-sm leading-none">
                     v1.2 • Adjustable Recursion
                 </div>
             </div>

@@ -10,15 +10,17 @@ export const fragmentShader = `
   varying vec2 vUv;
   
   uniform sampler2D uStateTexture;
-  uniform vec2 uHover;
+  uniform ivec2 uHover;
   uniform vec4 uConstraint;
   uniform float uTime;
   uniform float uPlayer; 
-  uniform int uDepth; // New uniform
+  uniform int uDepth;
+  uniform int uGameOver; // 0 or 1
 
   // Colors
   const vec3 C_BG_BLUE = vec3(0.05, 0.07, 0.12);
   const vec3 C_BG_RED = vec3(0.12, 0.05, 0.05);
+  const vec3 C_BG_NEUTRAL = vec3(0.02, 0.02, 0.02);
 
   const vec3 C_1X = vec3(0.3, 0.3, 0.3);
   const vec3 C_2X = vec3(0.5, 0.5, 0.5);
@@ -141,7 +143,10 @@ export const fragmentShader = `
         globalIdx += cellXY * multiplier;
     }
 
-    vec3 color = mix(C_BG_BLUE, C_BG_RED, uPlayer);
+    vec3 baseColor = mix(C_BG_BLUE, C_BG_RED, uPlayer);
+    if (uGameOver > 0) baseColor = C_BG_NEUTRAL;
+    
+    vec3 color = baseColor;
     
     if (inside) {
         vec2 idx = globalIdx;
@@ -263,7 +268,7 @@ export const fragmentShader = `
             // e.g. uDepth=2. Max level is 1. (Root).
             // k=0 (Level 1). OK.
             // k=1 (Level 2). Break.
-            if (k >= uDepth - 1) break; 
+            if (k >= uDepth) break; 
             
             float val = (k==0) ? state.g : (k==1) ? state.b : state.a;
             
@@ -306,27 +311,31 @@ export const fragmentShader = `
                     color = mix(color, winColor, lineMask * lvlOpacity * 0.6);
                 }
                 
-                // 2. Draw Symbol (Foreground)
-                vec2 p = lUV * 2.0 - 1.0;
-                float dSym = 0.0;
-                if (isX) {
-                     float d1 = sdSegment(p, vec2(-0.8, -0.8), vec2(0.8, 0.8));
-                     float d2 = sdSegment(p, vec2(-0.8, 0.8), vec2(0.8, -0.8));
-                     dSym = min(d1, d2);
-                } else {
-                     dSym = abs(length(p) - 0.8);
-                }
-                
-                float symThickness = 0.15 + float(k) * 0.05;
-                float symMask = drawStroke(dSym, symThickness, lPx);
-                
-                color = mix(color, winColor, symMask * lvlOpacity); 
+                if (k < uDepth - 1) {
+                    // 2. Draw Symbol (Foreground)
+                    vec2 p = lUV * 2.0 - 1.0;
+                    float dSym = 0.0;
+                    if (isX) {
+                         float d1 = sdSegment(p, vec2(-0.8, -0.8), vec2(0.8, 0.8));
+                         float d2 = sdSegment(p, vec2(-0.8, 0.8), vec2(0.8, -0.8));
+                         dSym = min(d1, d2);
+                    } else {
+                         dSym = abs(length(p) - 0.8);
+                    }
+                    
+                    float symThickness = 0.15 + float(k) * 0.05;
+                    float symMask = drawStroke(dSym, symThickness, lPx);
+                    
+                    color = mix(color, winColor, symMask * lvlOpacity); 
+                } 
             }
         }
         
         // 7. Hover Highlight
-        if (floor(idx.x + 0.1) == floor(uHover.x + 0.1) && 
-            floor(idx.y + 0.1) == floor(uHover.y + 0.1)) {
+        int gx = int(floor(globalIdx.x + 0.5));
+        int gy = int(floor(globalIdx.y + 0.5));
+
+        if (gx == uHover.x && gy == uHover.y) {
             color += vec3(0.15) * safeArea;
         }
     }

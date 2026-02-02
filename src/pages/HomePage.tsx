@@ -8,10 +8,7 @@ import type { GameMode } from '../game/types';
 export const HomePage = () => {
     const navigate = useNavigate();
     const [hasSavedGame] = useState(() => !!loadGameState());
-    const [showIntro, setShowIntro] = useState(() => {
-        const hasSeen = localStorage.getItem('hasSeenIntro');
-        return !hasSeen;
-    });
+    const [showIntro, setShowIntro] = useState(false);
 
     const handleStartGame = (mode: GameMode, depth: number) => {
         // Clear previous state for a fresh game
@@ -37,7 +34,6 @@ export const HomePage = () => {
 
     const handleDismissIntro = () => {
         setShowIntro(false);
-        localStorage.setItem('hasSeenIntro', 'true');
     };
 
     const handleShowIntro = () => {

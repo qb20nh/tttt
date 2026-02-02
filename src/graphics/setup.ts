@@ -5,7 +5,6 @@ import {
     NearestFilter,
     RGBAFormat,
     ShaderMaterial,
-    Vector2,
     Vector4,
     PlaneGeometry,
     Scene,
@@ -46,11 +45,12 @@ export const createGameMaterial = (
         fragmentShader,
         uniforms: {
             uStateTexture: { value: texture },
-            uHover: { value: new Vector2(-1, -1) },
+            uHover: { value: [-1, -1] },
             uConstraint: { value: new Vector4(initialConstraint.x, initialConstraint.y, initialConstraint.w, initialConstraint.h) },
             uPlayer: { value: initialPlayer },
             uTime: { value: 0 },
-            uDepth: { value: initialDepth }
+            uDepth: { value: initialDepth },
+            uGameOver: { value: 0 }
         },
     });
 };

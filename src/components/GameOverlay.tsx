@@ -51,10 +51,8 @@ export const GameOverlay = ({
             dom.style.zIndex = 'auto';
             dom.style.display = 'flex';
             dom.style.gap = '0px';
-            dom.style.pointerEvents = 'none'; // Ensure the stats themselves don't block clicks (though the container will also have it)
+            dom.style.pointerEvents = 'none';
 
-            // Force visibility of specific panels
-            // 0: FPS, 1: MS, 2: MB
             Array.from(dom.children).forEach((child, index) => {
                 const el = child as HTMLElement;
                 if (index <= 1) { // Show FPS (0) and MS (1)
@@ -108,7 +106,7 @@ export const GameOverlay = ({
                 <div className="bg-slate-900/90 border border-slate-700 p-4 rounded-xl shadow-2xl transition-all duration-300 ease-out">
                     <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">Current Turn</div>
                     <div className="flex items-center gap-4">
-                        {/* Player Shape Icon - Fixed container for stability & optical balance */}
+                        {/* Player Shape Icon */}
                         <div className="w-12 h-12 flex items-center justify-center">
                             {currentPlayer === 'X' ? (
                                 <X className="w-10 h-10 text-cyan-400 drop-shadow-[0_0_15px_rgba(34,211,238,0.5)]" strokeWidth={3} />
@@ -117,7 +115,7 @@ export const GameOverlay = ({
                             )}
                         </div>
 
-                        {/* Integrated AI Spinner - Animated Expansion */}
+                        {/* Integrated AI Spinner */}
                         <div className={`overflow-hidden transition-all duration-300 ease-out ${isAiThinking ? 'max-w-[200px] opacity-100' : 'max-w-0 opacity-0'}`}>
                             <div className="flex items-center gap-2 border-l border-slate-700 pl-4 whitespace-nowrap">
                                 <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />

@@ -55,10 +55,12 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
     const lastMousePosition = useRef({ x: 0, y: 0 });
     const zoomLevel = useRef(persistedZoom);
     const panOffset = useRef(persistedPan);
+    const gameOverRef = useRef(false);
     const [cursorClass, setCursorClass] = useState('cursor-default');
 
     // Smooth Transition State
     const playerValRef = useRef(currentPlayer === 'X' ? 0 : 1);
+    const targetPlayerValRef = useRef(currentPlayer === 'X' ? 0 : 1);
 
     // --- Interaction Helpers ---
     const updateCamera = useCallback(() => {
@@ -104,9 +106,17 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
         }
     }));
 
-    const transitionRef = useRef({ start: 0, target: 0, startTime: 0 });
+
 
     // --- Board State to Texture ---
+    // Update input timestamp when board/winner changes to ensure specific frames are rendered
+    // (Fixes issue where AI wins while user is idle, and renderer sleeps before showing final move)
+    useEffect(() => {
+        lastActivityRef.current = performance.now();
+    }, [board, winner]);
+
+    const lastActivityRef = useRef(0);
+
     const updateTexture = useCallback(() => {
         if (!textureRef.current || !board) return;
 
@@ -176,6 +186,9 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
         textureRef.current.needsUpdate = true;
     }, [board, depth]);
 
+    // Capture initial props for one-time setup to avoid dependency cycle in useLayoutEffect
+    const setupProps = useRef({ activeConstraint, currentPlayer, depth });
+
     // --- Initialization ---
     // Use useLayoutEffect to attach renderer BEFORE paint
     useLayoutEffect(() => {
@@ -210,9 +223,11 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
         textureRef.current = texture;
 
         // Material
-        const initialPlayerVal = currentPlayer === 'X' ? 0 : 1;
-        const initialConstraint = getConstraintRect(activeConstraint, depth);
-        const material = createGameMaterial(texture, depth, initialPlayerVal, initialConstraint);
+        // Use captured props for initial setup
+        const { activeConstraint: initConstraint, currentPlayer: initPlayer, depth: initDepth } = setupProps.current;
+        const initialPlayerVal = initPlayer === 'X' ? 0 : 1;
+        const initialConstraintRect = getConstraintRect(initConstraint, initDepth);
+        const material = createGameMaterial(texture, initDepth, initialPlayerVal, initialConstraintRect);
         materialRef.current = material;
         playerValRef.current = initialPlayerVal; // Sync ref too
 
@@ -222,10 +237,9 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
         // Loop Logic
         let lastTime = performance.now();
         let animationId: number;
-        let lastInputTime = performance.now();
 
         const handleInput = () => {
-            lastInputTime = performance.now();
+            lastActivityRef.current = performance.now();
         };
 
         const handleEnter = () => { isHovering.current = true; };
@@ -241,22 +255,16 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
         const renderFrame = (t: number, dt: number) => {
             material.uniforms.uTime.value = t * 0.001;
 
-            // Animate Player Color Transition
-            const { start: colorStart, target, startTime } = transitionRef.current;
-            const now = performance.now();
-            const duration = 250; // ms
-            let p = (now - startTime) / duration;
-            p = Math.max(0, Math.min(1, p));
-            // smoothstep ease
-            const ease = MathUtils.smoothstep(p, 0, 1);
-            const val = MathUtils.lerp(colorStart, target, ease);
-
-            playerValRef.current = val;
-            material.uniforms.uPlayer.value = val;
-
-            // Animate Constraint
+            // Animate Constraint & Player Color (Synced Decay)
             const decay = 15.0; // Adjustable speed
             const alpha = 1.0 - Math.exp(-decay * dt);
+
+            // Animate Player Color Transition
+            playerValRef.current = MathUtils.lerp(playerValRef.current, targetPlayerValRef.current, alpha);
+            material.uniforms.uPlayer.value = playerValRef.current;
+
+            // Animate Constraint
+
 
             constraintRef.current.lerp(targetConstraintRef.current, alpha);
 
@@ -307,10 +315,28 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
                 return;
             }
 
-            // 3. Dynamic FPS (Active vs Idle)
-            const isActive = (time - lastInputTime) < 2000; // Active for 2s after input
+            // 3. Dynamic FPS (Active vs Idle vs Game Over)
+            // Use gameOverRef to avoid stale closure issues in the animation loop
+            const currentState = !!gameOverRef.current;
+            const isActive = (time - lastActivityRef.current) < 2000;
 
-            if (isActive) {
+            if (currentState) {
+                // Game Over Mode: Only render if active (recent interaction)
+
+                if (isActive) {
+                    const dt = Math.min((time - lastTime) / 1000, 0.1);
+                    statsInstance?.begin();
+                    renderFrame(time, dt);
+                    statsInstance?.end();
+                    lastTime = time;
+                } else {
+                    // Idle in Game Over: Sleep completely, check periodically for wake-up
+                    const checkInterval = 200;
+                    if (time - lastTime > checkInterval) {
+                        lastTime = time; // Tick to avoid huge dt spike
+                    }
+                }
+            } else if (isActive) {
                 // Active: Uncapped (VSync Limit)
                 const dt = Math.min((time - lastTime) / 1000, 0.1);
                 statsInstance?.begin();
@@ -382,13 +408,7 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
             material.dispose();
             geometry.dispose();
         };
-    }, [updateCamera, statsInstance]); // eslint-disable-line react-hooks/exhaustive-deps
-    // Actually, if depth changes, material needs update for uDepth.
-    // texture needs update.
-    // geometry is same.
-    // If we want uDepth to update, we can do it in a separate useEffect.
-
-    // --- Texture & Uniform Updates ---
+    }, [updateCamera, statsInstance]);
     useEffect(() => {
         updateTexture();
     }, [updateTexture, board]);
@@ -402,9 +422,15 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
         if (materialRef.current) {
             let rect = getConstraintRect(activeConstraint, depth);
 
-            // If game is over (winner exists), hide the constraint glow
+            // If game is over (winner exists), hide the constraint glow.
+            // Also update the uGameOver uniform.
             if (winner) {
                 rect = { x: 0, y: 0, w: 0, h: 0 };
+                materialRef.current.uniforms.uGameOver.value = 1;
+                gameOverRef.current = true;
+            } else {
+                materialRef.current.uniforms.uGameOver.value = 0;
+                gameOverRef.current = false;
             }
 
             targetConstraintRef.current.set(rect.x, rect.y, rect.w, rect.h);
@@ -413,12 +439,7 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
             materialRef.current.uniforms.uDepth.value = depth;
 
             const target = currentPlayer === 'X' ? 0 : 1;
-            // Start transition from CURRENT value
-            transitionRef.current = {
-                start: playerValRef.current,
-                target: target,
-                startTime: performance.now()
-            };
+            targetPlayerValRef.current = target;
         }
     }, [activeConstraint, currentPlayer, depth, winner]);
 
@@ -539,7 +560,10 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
         if (uv.x >= 0 && uv.x <= 1 && uv.y >= 0 && uv.y <= 1) {
             const mapped = mapUVToCell(uv, depth);
             if (mapped.valid) {
-                materialRef.current.uniforms.uHover.value.set(mapped.x, mapped.y);
+                // Use array assignment for ivec2
+                const h = materialRef.current.uniforms.uHover.value;
+                h[0] = mapped.x;
+                h[1] = mapped.y;
 
                 // Cursor Logic
                 if (activeConstraint.length === 0 || isInsideConstraint(uv, activeConstraint)) {
@@ -550,11 +574,15 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
                     else setCursorClass('cursor-default');
                 }
             } else {
-                materialRef.current.uniforms.uHover.value.set(-1, -1);
+                const h = materialRef.current.uniforms.uHover.value;
+                h[0] = -1;
+                h[1] = -1;
                 setCursorClass('cursor-default');
             }
         } else {
-            materialRef.current.uniforms.uHover.value.set(-1, -1);
+            const h = materialRef.current.uniforms.uHover.value;
+            h[0] = -1;
+            h[1] = -1;
             setCursorClass('cursor-default');
         }
     };

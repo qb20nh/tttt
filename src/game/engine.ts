@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import type { BoardNode, Player, Winner, GameMode } from './types';
 import { DEFAULT_DEPTH, getSearchDepth } from './constants';
 import { generateBoard, isFull, canWin, isValidPath, getPathFromCoordinates, getWonDepth, getNextConstraint } from './logic';
@@ -36,18 +36,6 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH, isPlaying: bo
     const workerX = useRef<Worker | null>(null);
     const workerO = useRef<Worker | null>(null);
 
-    // Initialize Workers
-    useEffect(() => {
-        const createWorker = () => new Worker(new URL('./ai/worker.ts', import.meta.url), { type: 'module' });
-
-        workerX.current = createWorker();
-        workerO.current = createWorker();
-
-        return () => {
-            workerX.current?.terminate();
-            workerO.current?.terminate();
-        };
-    }, []);
 
     const latestState = useRef({ board, activeConstraint, currentPlayer, winner, gameMode, depth });
     useEffect(() => {
@@ -103,7 +91,7 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH, isPlaying: bo
     }, [currentPlayer, winner, board, activeConstraint, gameMode, depth, isAiThinking, isPlaying]);
 
 
-    const handleMoveInternal = (gridX: number, gridY: number, currentBoard: BoardNode, currentC: number[], currentP: Player, currentW: Winner, d: number) => {
+    const handleMoveInternal = useCallback((gridX: number, gridY: number, currentBoard: BoardNode, currentC: number[], currentP: Player, currentW: Winner, d: number) => {
         if (currentW) return null;
 
         // 1. Decompose Coordinates & Path Validity
@@ -175,9 +163,9 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH, isPlaying: bo
         }
 
         return { newBoard, rootWinner, nextC };
-    };
+    }, []);
 
-    const applyMove = (result: { newBoard: BoardNode, rootWinner: Winner, nextC: number[] }) => {
+    const applyMove = useCallback((result: { newBoard: BoardNode, rootWinner: Winner, nextC: number[] }) => {
         setBoard(result.newBoard);
         setWinner(result.rootWinner);
 
@@ -190,49 +178,23 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH, isPlaying: bo
         });
 
         setCurrentPlayer(p => p === 'X' ? 'O' : 'X');
-    };
+    }, []);
 
-    const handleMove = (gridX: number, gridY: number) => {
-        if (winner) return;
-        if (gameMode === 'PvAI' && currentPlayer === 'O') return;
-        if (isAiThinking && gameMode !== 'PvP') return;
-        if (gameMode === 'AIvAI') return;
+    // --- Worker Management ---
+    const terminateWorkers = useCallback(() => {
+        if (workerX.current) { workerX.current.terminate(); workerX.current = null; }
+        if (workerO.current) { workerO.current.terminate(); workerO.current = null; }
+    }, []);
 
-        const result = handleMoveInternal(gridX, gridY, board, activeConstraint, currentPlayer, winner, depth);
-        if (!result) return;
+    const initializeWorkers = useCallback(() => {
+        terminateWorkers();
 
-        applyMove(result);
-    };
-
-    const resetGame = (newMode?: GameMode, newDepth?: number) => {
-        clearSavedState();
-
-        // Clear AI memory
-        workerX.current?.postMessage({ type: 'clear' });
-        workerO.current?.postMessage({ type: 'clear' });
-
-        // Invalidate pending searches by incrementing ID
-        searchIdRef.current += 1;
-
-        const d = newDepth !== undefined ? newDepth : depth;
-        // Update depth state effectively?
-        if (newDepth !== undefined) setDepth(newDepth);
-
-        setBoard(generateBoard(d));
-        setCurrentPlayer('X');
-        setActiveConstraint([]);
-        setWinner(null);
-        setIsAiThinking(false);
-        if (newMode) setGameMode(newMode);
-    };
-
-
-    // Handle AI Worker Response (Placed here to access handleMoveInternal)
-    useEffect(() => {
-        if (!workerX.current || !workerO.current) return;
+        const createWorker = () => new Worker(new URL('./ai/worker.ts', import.meta.url), { type: 'module' });
+        workerX.current = createWorker();
+        workerO.current = createWorker();
 
         const handleWorkerMessage = async (e: MessageEvent) => {
-            const { type, result, id } = e.data; // Extract ID
+            const { type, result, id } = e.data;
 
             if (type === 'benchmark_result') {
                 console.table(result);
@@ -241,11 +203,7 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH, isPlaying: bo
             }
 
             if (type === 'result') {
-                // ID Validation: If ID mismatches, discard
-                if (id !== searchIdRef.current) {
-                    console.warn("Discarding stale AI result", id, "Expected:", searchIdRef.current);
-                    return;
-                }
+                if (id !== searchIdRef.current) return; // Stale
 
                 const current = latestState.current;
                 const d = current.depth;
@@ -294,8 +252,56 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH, isPlaying: bo
 
         workerX.current.onmessage = handleWorkerMessage;
         workerO.current.onmessage = handleWorkerMessage;
+    }, [handleMoveInternal, applyMove, terminateWorkers]);
 
-    }, []);
+    // Lifecycle: Init on mount, Terminate on unmount
+    useEffect(() => {
+        initializeWorkers();
+        return () => terminateWorkers();
+    }, [initializeWorkers, terminateWorkers]);
+
+    // Lifecycle: Terminate when Game Over (Prompt Memory Release)
+    useEffect(() => {
+        if (winner) {
+            terminateWorkers();
+        }
+    }, [winner, terminateWorkers]);
+
+    const handleMove = (gridX: number, gridY: number) => {
+        if (winner) return;
+        if (gameMode === 'PvAI' && currentPlayer === 'O') return;
+        if (isAiThinking && gameMode !== 'PvP') return;
+        if (gameMode === 'AIvAI') return;
+
+        const result = handleMoveInternal(gridX, gridY, board, activeConstraint, currentPlayer, winner, depth);
+        if (!result) return;
+
+        applyMove(result);
+    };
+
+    const resetGame = (newMode?: GameMode, newDepth?: number) => {
+        clearSavedState();
+
+        // Clear AI memory
+        // Clear AI memory? Workers are fresh.
+        // If we didn't terminate, we'd clear.
+        // But resetGame ensures fresh workers.
+        initializeWorkers();
+
+        // Invalidate pending searches by incrementing ID
+        searchIdRef.current += 1;
+
+        const d = newDepth !== undefined ? newDepth : depth;
+        // Update depth state effectively?
+        if (newDepth !== undefined) setDepth(newDepth);
+
+        setBoard(generateBoard(d));
+        setCurrentPlayer('X');
+        setActiveConstraint([]);
+        setWinner(null);
+        setIsAiThinking(false);
+        if (newMode) setGameMode(newMode);
+    };
 
     // Persistence
     useEffect(() => {
