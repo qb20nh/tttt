@@ -50,6 +50,7 @@ export const createGameMaterial = (
             uPlayer: { value: initialPlayer },
             uTime: { value: 0 },
             uDepth: { value: initialDepth },
+            uConstraintLevel: { value: 0 },
             uGameOver: { value: 0 }
         },
     });

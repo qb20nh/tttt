@@ -119,7 +119,7 @@ export const GameOverlay = ({
                         <div className={`overflow-hidden transition-all duration-300 ease-out ${isAiThinking ? 'max-w-[200px] opacity-100' : 'max-w-0 opacity-0'}`}>
                             <div className="flex items-center gap-2 border-l border-slate-700 pl-4 whitespace-nowrap">
                                 <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />
-                                <span className="text-cyan-400 text-xs font-bold uppercase tracking-widest">AI Thinking</span>
+                                <span className="text-cyan-400 text-xs font-bold uppercase tracking-widest">Thinking</span>
                             </div>
                         </div>
                     </div>
@@ -128,7 +128,7 @@ export const GameOverlay = ({
 
             {/* Bottom Right: Zoom Controls */}
             <div className="absolute bottom-4 right-4 z-10">
-                <div className="flex bg-slate-900/90 border border-slate-700 rounded-xl overflow-hidden shadow-2xl">
+                <div className="flex flex-col md:flex-row bg-slate-900/90 border border-slate-700 rounded-xl overflow-hidden shadow-2xl">
                     <button
                         onClick={onZoomOut}
                         className="p-3 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors active:bg-slate-700 cursor-pointer"
@@ -136,7 +136,7 @@ export const GameOverlay = ({
                     >
                         <Minus className="w-5 h-5" />
                     </button>
-                    <div className="w-px bg-slate-700" />
+                    <div className="w-full h-px md:w-px md:h-auto bg-slate-700" />
                     <button
                         onClick={onResetView}
                         className="p-3 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors active:bg-slate-700 cursor-pointer"
@@ -144,7 +144,7 @@ export const GameOverlay = ({
                     >
                         <Home className="w-5 h-5" />
                     </button>
-                    <div className="w-px bg-slate-700" />
+                    <div className="w-full h-px md:w-px md:h-auto bg-slate-700" />
                     <button
                         onClick={onZoomIn}
                         className="p-3 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors active:bg-slate-700 cursor-pointer"

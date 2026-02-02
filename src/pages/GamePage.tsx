@@ -43,6 +43,8 @@ export const GamePage = () => {
     const initializeNewGame = useCallback(() => {
         if (!hasInitialized.current && routeState?.isNewGame && routeState.mode && routeState.depth) {
             resetGame(routeState.mode, routeState.depth);
+            // Also reset view for a fresh start
+            sceneRef.current?.resetView();
             hasInitialized.current = true;
         }
     }, [routeState?.isNewGame, routeState?.mode, routeState?.depth, resetGame]);
@@ -76,6 +78,7 @@ export const GamePage = () => {
                 onMove={handleMove}
                 statsInstance={stats}
                 depth={depth}
+                initialReset={!!routeState?.isNewGame}
             />
 
             <GameOverlay
@@ -84,6 +87,7 @@ export const GamePage = () => {
                 onReset={() => {
                     // Reset current game (same settings)
                     resetGame();
+                    sceneRef.current?.resetView();
                 }}
                 onZoomIn={() => sceneRef.current?.zoomIn()}
                 onZoomOut={() => sceneRef.current?.zoomOut()}

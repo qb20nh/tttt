@@ -15,6 +15,7 @@ export const fragmentShader = `
   uniform float uTime;
   uniform float uPlayer; 
   uniform int uDepth;
+  uniform int uConstraintLevel;
   uniform int uGameOver; // 0 or 1
 
   // Colors
@@ -362,12 +363,15 @@ export const fragmentShader = `
        float w = uConstraint.z;
        
        // Continuous thickness
-       // Top Level (w=1.0) -> Multiplier 5.0
-       // Depth = -log3(w)
-       float depth = -log(w) / 1.09861228867; // 1.098... is ln(3)
-       float mult = 5.0 - depth;
+       // Use uConstraintLevel to determine thickness.
+       // Len 1 -> Level 0 Thickness (5.0).
+       // Len 2 -> Level 1 Thickness (4.0).
+       // Formula: 5.0 - (Len - 1) = 6.0 - Len.
+       // uConstraintLevel is Len.
+        
+       float mult = 6.0 - float(uConstraintLevel);
        mult = max(mult, 1.0); 
-       
+        
        float goldThick = (BASE_GAP * mult) / gridSize.x; 
        float goldBorder = drawStroke(abs(d), goldThick, globalPx);
        float pulse = 0.6 + 0.4 * sin(uTime * 4.0);

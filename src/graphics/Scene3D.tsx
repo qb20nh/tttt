@@ -35,13 +35,75 @@ interface Scene3DProps {
     onMove: (x: number, y: number) => void;
     statsInstance: Stats | null;
     depth: number;
+    initialReset?: boolean;
 }
+
+// --- Texture Helper ---
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const fillTextureBuffer = (data: any, board: BoardNode, depth: number) => {
+    const size = BOARD_SIZE * BOARD_SIZE;
+    // Reset
+    for (let i = 0; i < size * 4; i++) data[i] = 0;
+
+    const traverse = (node: BoardNode, x: number, y: number, currentDepth: number) => {
+        // 1. Mark Leaf
+        if (currentDepth === 0) {
+            if (node.value) {
+                const idx = (y * BOARD_SIZE + x) * 4;
+                // r channel uses 0..1 range. 0.3 for X, 0.7 for O
+                data[idx] = node.value === 'X' ? 0.3 : 0.7;
+            }
+            return;
+        }
+
+        // 2. Mark Node Winner/Value
+        const val = node.winner || node.value;
+        if (val) {
+            // Flood fill this node's area in the appropriate channel
+            // We map depth to channel. 
+            // Leaf (depth 0) -> R (channel 0)
+            // Depth 1 -> G (channel 1)
+            // Depth 2 -> B (channel 2)
+            // Depth 3 -> A (channel 3)
+
+            const channel = currentDepth;
+            const floatVal = (val === 'X' ? 0.3 : 0.7) + (node.winPattern >= 0 ? 0.02 * node.winPattern : 0);
+
+            const startX = x;
+            const startY = y;
+            const dim = Math.pow(3, currentDepth);
+
+            for (let dy = 0; dy < dim; dy++) {
+                for (let dx = 0; dx < dim; dx++) {
+                    const px = startX + dx;
+                    const py = startY + dy;
+                    if (px < BOARD_SIZE && py < BOARD_SIZE) {
+                        const idx = (py * BOARD_SIZE + px) * 4;
+                        data[idx + channel] = floatVal;
+                    }
+                }
+            }
+        }
+
+        if (node.children) {
+            const childSize = Math.pow(3, currentDepth - 1);
+            for (let i = 0; i < 9; i++) {
+                const childNode = node.children[i];
+                const cx = x + (i % 3) * childSize;
+                const cy = y + Math.floor(i / 3) * childSize;
+                traverse(childNode, cx, cy, currentDepth - 1);
+            }
+        }
+    };
+
+    traverse(board, 0, 0, depth);
+};
 
 // HMR Persistence
 let persistedZoom = 0.9;
 let persistedPan = { x: 0, y: 0 };
 
-export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove, statsInstance, depth, ref }: Scene3DProps & { ref?: React.Ref<Scene3DHandle> }) => {
+export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove, statsInstance, depth, initialReset, ref }: Scene3DProps & { ref?: React.Ref<Scene3DHandle> }) => {
     // ... (refs)
     const mountRef = useRef<HTMLDivElement>(null);
     const rendererRef = useRef<WebGLRenderer | null>(null);
@@ -53,8 +115,8 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
     const isHovering = useRef(true);
     const dragStartPos = useRef({ x: 0, y: 0 });
     const lastMousePosition = useRef({ x: 0, y: 0 });
-    const zoomLevel = useRef(persistedZoom);
-    const panOffset = useRef(persistedPan);
+    const zoomLevel = useRef(initialReset ? 0.9 : persistedZoom);
+    const panOffset = useRef(initialReset ? { x: 0, y: 0 } : persistedPan);
     const gameOverRef = useRef(false);
     const [cursorClass, setCursorClass] = useState('cursor-default');
 
@@ -62,19 +124,29 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
     const playerValRef = useRef(currentPlayer === 'X' ? 0 : 1);
     const targetPlayerValRef = useRef(currentPlayer === 'X' ? 0 : 1);
 
+    // Touch State
+    const touchStartDist = useRef(0);
+    const touchStartZoom = useRef(0);
+
     // --- Interaction Helpers ---
+    const getFrustumSize = (aspect: number, zoom: number) => {
+        if (aspect >= 1) {
+            return { w: aspect / zoom, h: 1.0 / zoom };
+        } else {
+            return { w: 1.0 / zoom, h: (1.0 / aspect) / zoom };
+        }
+    };
+
     const updateCamera = useCallback(() => {
         if (!cameraRef.current || !rendererRef.current) return;
         const w = rendererRef.current.domElement.width;
         const h = rendererRef.current.domElement.height;
         const aspect = w / h;
         const zoom = zoomLevel.current;
+
+        const { w: frusW, h: frusH } = getFrustumSize(aspect, zoom);
         const px = panOffset.current.x;
         const py = panOffset.current.y;
-
-        // View width = 2 * aspect / zoom
-        const frusW = aspect / zoom;
-        const frusH = 1.0 / zoom;
 
         cameraRef.current.left = -frusW + px;
         cameraRef.current.right = frusW + px;
@@ -83,10 +155,14 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
         cameraRef.current.updateProjectionMatrix();
     }, []);
 
+    // Helper for max zoom
+    const getMaxZoom = () => Math.pow(3, depth - 1);
+
     // Expose Controls
     useImperativeHandle(ref, () => ({
         zoomIn: () => {
-            const newZoom = Math.min(zoomLevel.current * 1.2, 20);
+            const maxZoom = getMaxZoom();
+            const newZoom = Math.min(zoomLevel.current * 1.2, maxZoom);
             zoomLevel.current = newZoom;
             persistedZoom = newZoom;
             updateCamera();
@@ -120,74 +196,15 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
     const updateTexture = useCallback(() => {
         if (!textureRef.current || !board) return;
 
-        const size = BOARD_SIZE * BOARD_SIZE;
         const data = textureRef.current.image.data;
         if (!data) return;
 
-        // Reset
-        for (let i = 0; i < size * 4; i++) data[i] = 0;
-
-        const traverse = (node: BoardNode, x: number, y: number, currentDepth: number) => {
-            // 1. Mark Leaf
-            if (currentDepth === 0) {
-                if (node.value) {
-                    const idx = (y * BOARD_SIZE + x) * 4;
-                    // r channel uses 0..1 range. 0.3 for X, 0.7 for O
-                    data[idx] = node.value === 'X' ? 0.3 : 0.7;
-                }
-                return;
-            }
-
-            // 2. Mark Node Winner/Value
-            const val = node.winner || node.value;
-            if (val) {
-                // Flood fill this node's area in the appropriate channel
-                // We map depth to channel. 
-                // Leaf (depth 0) -> R (channel 0)
-                // Depth 1 -> G (channel 1)
-                // Depth 2 -> B (channel 2)
-                // Depth 3 -> A (channel 3)
-                // This assumes Max Depth 4. If Depth is 2, we use channels 0 and 1.
-                // We need to know 'level from bottom'. currentDepth IS level from bottom.
-
-                const channel = currentDepth;
-
-                // Pattern logic encoded in value (0.3/0.7 + pattern offsets)
-                const floatVal = (val === 'X' ? 0.3 : 0.7) + (node.winPattern >= 0 ? 0.02 * node.winPattern : 0);
-
-                const startX = x;
-                const startY = y;
-                const dim = Math.pow(3, currentDepth);
-
-                for (let dy = 0; dy < dim; dy++) {
-                    for (let dx = 0; dx < dim; dx++) {
-                        const px = startX + dx;
-                        const py = startY + dy;
-                        if (px < BOARD_SIZE && py < BOARD_SIZE) {
-                            const idx = (py * BOARD_SIZE + px) * 4;
-                            data[idx + channel] = floatVal;
-                        }
-                    }
-                }
-            }
-
-            if (node.children) {
-                const childSize = Math.pow(3, currentDepth - 1);
-                for (let i = 0; i < 9; i++) {
-                    const childNode = node.children[i];
-                    const cx = x + (i % 3) * childSize;
-                    const cy = y + Math.floor(i / 3) * childSize;
-                    traverse(childNode, cx, cy, currentDepth - 1);
-                }
-            }
-        };
-
-        traverse(board, 0, 0, depth);
+        fillTextureBuffer(data, board, depth);
         textureRef.current.needsUpdate = true;
     }, [board, depth]);
 
     // Capture initial props for one-time setup to avoid dependency cycle in useLayoutEffect
-    const setupProps = useRef({ activeConstraint, currentPlayer, depth });
+    const setupProps = useRef({ activeConstraint, currentPlayer, depth, board });
 
     // --- Initialization ---
     // Use useLayoutEffect to attach renderer BEFORE paint
@@ -234,6 +251,40 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
         // Geometry
         const { mesh, geometry } = createGameMesh(material);
         scene.add(mesh);
+
+        // --- SYNCHRONOUS INITIAL RENDER (Fix Stale Frame) ---
+        // 1. Fill Texture (using captured board)
+        if (setupProps.current.board && texture.image.data) {
+            fillTextureBuffer(texture.image.data, setupProps.current.board, initDepth);
+            texture.needsUpdate = true;
+        }
+
+        // 2. Set Camera
+        // Ensure camera is updated based on current dims
+        if (mountRef.current) {
+            const w = mountRef.current.clientWidth;
+            const h = mountRef.current.clientHeight;
+            renderer.setSize(w, h); // Just in case
+
+            // Correct Aspect
+            const aspect = w / h;
+            const zoom = zoomLevel.current; // Already reset if initialReset is true
+
+            // Update Projection Ref manually without calling local updateCamera yet
+            const { w: frusW, h: frusH } = getFrustumSize(aspect, zoom);
+            const px = panOffset.current.x;
+            const py = panOffset.current.y;
+
+            camera.left = -frusW + px;
+            camera.right = frusW + px;
+            camera.top = frusH + py;
+            camera.bottom = -frusH + py;
+            camera.updateProjectionMatrix();
+        }
+
+        // 3. Render
+        renderer.render(scene, camera);
+
         // Loop Logic
         let lastTime = performance.now();
         let animationId: number;
@@ -438,6 +489,10 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
             // Also update depth uniform!
             materialRef.current.uniforms.uDepth.value = depth;
 
+            // Update Constraint Level (Len)
+            // If constraint is empty, level is 0? Or doesn't matter as w=0.
+            materialRef.current.uniforms.uConstraintLevel.value = activeConstraint.length;
+
             const target = currentPlayer === 'X' ? 0 : 1;
             targetPlayerValRef.current = target;
         }
@@ -456,8 +511,10 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
         const zoom = zoomLevel.current;
 
         // Map NDC back to World Space based on current camera
-        const worldX = ndcX * (aspect / zoom) + panOffset.current.x;
-        const worldY = ndcY * (1.0 / zoom) + panOffset.current.y;
+        const { w: frusW, h: frusH } = getFrustumSize(aspect, zoom);
+
+        const worldX = ndcX * frusW + panOffset.current.x;
+        const worldY = ndcY * frusH + panOffset.current.y;
 
         // UV 0 is at -1, UV 1 is at 1.
         const uvX = (worldX + 1) / 2;
@@ -482,24 +539,26 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
 
         // Current World Position of mouse
         const oldZoom = zoomLevel.current;
-        const mouseWorldX = ndcX * (aspect / oldZoom) + panOffset.current.x;
-        const mouseWorldY = ndcY * (1.0 / oldZoom) + panOffset.current.y;
+        const { w: oldFrusW, h: oldFrusH } = getFrustumSize(aspect, oldZoom);
+
+        const mouseWorldX = ndcX * oldFrusW + panOffset.current.x;
+        const mouseWorldY = ndcY * oldFrusH + panOffset.current.y;
 
         const factor = 1.1;
         let newZoom = oldZoom;
         if (e.deltaY < 0) newZoom *= factor;
         else newZoom /= factor;
 
-        newZoom = Math.min(Math.max(newZoom, 0.5), 20);
+        const maxZoom = getMaxZoom();
+        newZoom = Math.min(Math.max(newZoom, 0.5), maxZoom);
         zoomLevel.current = newZoom;
         persistedZoom = newZoom;
 
         // Calculate new Pan Offset to keep mouseWorldX at same NDC
-        // mouseWorldX = ndcX * (aspect / newZoom) + newPanX
-        // newPanX = mouseWorldX - ndcX * (aspect / newZoom)
+        const { w: newFrusW, h: newFrusH } = getFrustumSize(aspect, newZoom);
 
-        panOffset.current.x = mouseWorldX - ndcX * (aspect / newZoom);
-        panOffset.current.y = mouseWorldY - ndcY * (1.0 / newZoom);
+        panOffset.current.x = mouseWorldX - ndcX * newFrusW;
+        panOffset.current.y = mouseWorldY - ndcY * newFrusH;
         persistedPan = { ...panOffset.current };
 
         updateCamera();
@@ -531,12 +590,15 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
             if (isDragging.current) {
                 lastMousePosition.current = { x: e.clientX, y: e.clientY };
 
-                const w = rendererRef.current?.domElement.width || 1;
-                const h = rendererRef.current?.domElement.height || 1;
+                const w = rendererRef.current?.domElement.clientWidth || 1;
+                const h = rendererRef.current?.domElement.clientHeight || 1;
                 const aspect = w / h;
 
-                const worldWidth = (2 * aspect) / zoomLevel.current;
-                const worldHeight = 2.0 / zoomLevel.current;
+                const { w: frusW, h: frusH } = getFrustumSize(aspect, zoomLevel.current);
+
+                // frusW is half-width (left to 0). Total width is 2*frusW.
+                const worldWidth = 2 * frusW;
+                const worldHeight = 2 * frusH;
 
                 panOffset.current.x -= (dx / w) * worldWidth;
                 panOffset.current.y += (dy / h) * worldHeight;
@@ -603,6 +665,117 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
         handleMouseMove(e);
     };
 
+    // --- Touch Handlers ---
+    const handleTouchStart = (e: React.TouchEvent) => {
+        // e.preventDefault(); // Controlled via CSS/Meta for now to avoid React passive issues
+
+        if (e.touches.length === 1) {
+            isDragging.current = false; // Wait for move
+            dragStartPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            lastMousePosition.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        } else if (e.touches.length === 2) {
+            const t0 = e.touches[0];
+            const t1 = e.touches[1];
+            const dist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
+            touchStartDist.current = dist;
+            touchStartZoom.current = zoomLevel.current;
+
+            lastMousePosition.current = {
+                x: (t0.clientX + t1.clientX) / 2,
+                y: (t0.clientY + t1.clientY) / 2
+            };
+        }
+    };
+
+    const handleTouchMove = (e: React.TouchEvent) => {
+        if (e.touches.length === 1) {
+            const t0 = e.touches[0];
+            const dx = t0.clientX - lastMousePosition.current.x;
+            const dy = t0.clientY - lastMousePosition.current.y;
+
+            if (!isDragging.current) {
+                const moveDist = Math.hypot(t0.clientX - dragStartPos.current.x, t0.clientY - dragStartPos.current.y);
+                if (moveDist > 5) isDragging.current = true;
+            }
+
+            if (isDragging.current) {
+                // Apply Pan
+                const w = rendererRef.current?.domElement.clientWidth || 1;
+                const h = rendererRef.current?.domElement.clientHeight || 1;
+                const aspect = w / h;
+                const { w: frusW, h: frusH } = getFrustumSize(aspect, zoomLevel.current);
+
+                panOffset.current.x -= (dx / w) * (2 * frusW);
+                panOffset.current.y += (dy / h) * (2 * frusH);
+
+                lastMousePosition.current = { x: t0.clientX, y: t0.clientY };
+                updateCamera();
+            }
+        } else if (e.touches.length === 2) {
+            const t0 = e.touches[0];
+            const t1 = e.touches[1];
+            const dist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
+
+            // Zoom
+            if (touchStartDist.current > 0) {
+                const scale = dist / touchStartDist.current;
+                let newZoom = touchStartZoom.current * scale;
+                const maxZoom = getMaxZoom();
+                newZoom = Math.min(Math.max(newZoom, 0.5), maxZoom);
+                zoomLevel.current = newZoom;
+                persistedZoom = newZoom;
+            }
+
+            // Pan (Pinch center move)
+            const cx = (t0.clientX + t1.clientX) / 2;
+            const cy = (t0.clientY + t1.clientY) / 2;
+            const dx = cx - lastMousePosition.current.x;
+            const dy = cy - lastMousePosition.current.y;
+
+            const w = rendererRef.current?.domElement.clientWidth || 1;
+            const h = rendererRef.current?.domElement.clientHeight || 1;
+            const aspect = w / h;
+            const { w: frusW, h: frusH } = getFrustumSize(aspect, zoomLevel.current);
+
+            // Inverse pan logic
+            panOffset.current.x -= (dx / w) * (2 * frusW);
+            panOffset.current.y += (dy / h) * (2 * frusH);
+
+            lastMousePosition.current = { x: cx, y: cy };
+            updateCamera();
+        }
+    };
+
+    const handleTouchEnd = (e: React.TouchEvent) => {
+        if (!isDragging.current && e.changedTouches.length > 0 && e.touches.length === 0) {
+            // Tap (Touch Click)
+            // Emulate click by creating a fake event-like object for getUV
+            const t0 = e.changedTouches[0];
+            // We need clientX/Y. getUV uses e.clientX directly.
+            // We can construct a minimal object that getUV accepts.
+            const fakeEvent = {
+                clientX: t0.clientX,
+                clientY: t0.clientY
+            };
+
+            // @ts-expect-error - fake event
+            const uv = getUV(fakeEvent);
+            if (uv.x >= 0 && uv.x <= 1 && uv.y >= 0 && uv.y <= 1) {
+                const mapped = mapUVToCell(uv, depth);
+                if (mapped.valid) {
+                    onMove(mapped.x, mapped.y);
+                }
+            }
+        }
+
+        if (e.touches.length === 0) {
+            isDragging.current = false;
+        } else if (e.touches.length === 1) {
+            // If going from 2 -> 1, reset last position to avoid jumps
+            lastMousePosition.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        }
+    };
+
     useEffect(() => {
         const onUp = () => { isDragging.current = false; };
         window.addEventListener('mouseup', onUp);
@@ -629,6 +802,9 @@ export const Scene3D = ({ board, activeConstraint, currentPlayer, winner, onMove
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
                 onContextMenu={e => e.preventDefault()}
             />
         </div>

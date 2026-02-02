@@ -10,9 +10,9 @@ export const IntroModal = ({ show, onDismiss }: IntroModalProps) => {
 
     return (
         <div className="absolute inset-0 z-[60] bg-black/90 flex items-center justify-center p-4 animate-in fade-in duration-500">
-            <div className="max-w-2xl w-full bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-8 overflow-hidden relative">
-                <div className="flex justify-between items-start mb-6">
-                    <h1 className="text-4xl font-black bg-gradient-to-r from-cyan-400 to-blue-600 bg-clip-text text-transparent">
+            <div className="max-w-2xl w-full bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-h-[90vh] flex flex-col overflow-hidden">
+                <div className="flex justify-between items-start p-6 md:p-8 pb-0 shrink-0">
+                    <h1 className="text-3xl md:text-4xl font-black bg-gradient-to-r from-cyan-400 to-blue-600 bg-clip-text text-transparent">
                         HOW TO PLAY
                     </h1>
                     <button
@@ -23,8 +23,8 @@ export const IntroModal = ({ show, onDismiss }: IntroModalProps) => {
                     </button>
                 </div>
 
-                <div className="space-y-6 text-slate-300 leading-relaxed">
-                    <p className="text-lg">
+                <div className="p-6 md:p-8 overflow-y-auto flex-1 text-slate-300 leading-relaxed custom-scrollbar">
+                    <p className="text-lg mb-6">
                         This is <span className="text-cyan-400 font-bold">Recursive Tic-Tac-Toe</span>. Each cell contains a smaller board, and each of those contains even smaller boards, down to 4 levels of depth.
                     </p>
 
@@ -55,7 +55,7 @@ export const IntroModal = ({ show, onDismiss }: IntroModalProps) => {
                     </div>
                 </div>
 
-                <div className="mt-8 pt-6 border-t border-slate-800 flex justify-end">
+                <div className="p-6 md:p-8 pt-4 border-t border-slate-800 flex justify-end shrink-0 bg-slate-900 z-10">
                     <button
                         onClick={onDismiss}
                         className="bg-white text-slate-900 px-8 py-3 rounded-xl font-bold hover:bg-cyan-50 transition-colors shadow-[0_0_20px_rgba(255,255,255,0.2)] active:scale-95 transform cursor-pointer"
