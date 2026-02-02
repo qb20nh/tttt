@@ -94,7 +94,7 @@ export const useGameState = (initialDepth: number = DEFAULT_DEPTH, isPlaying: bo
                 player: currentPlayer,
                 constraint: activeConstraint,
                 config: {
-                    maxTime: 12000,
+                    maxTime: 8500,
                     maxDepth: searchDepth, // Search depth (not board depth)
                     boardDepth: depth // Actual board depth
                 }

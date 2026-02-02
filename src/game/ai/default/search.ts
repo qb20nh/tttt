@@ -213,7 +213,7 @@ export class Search {
                 const context = Math.floor(move / parentScale);
                 const relMove = Math.floor(move / scale) % 9;
 
-                board.constraint = context * 9 + relMove;
+                board.constraint = Math.floor(context / 9) * 9 + relMove;
                 board.constraintLayer = targetLayer;
             }
 

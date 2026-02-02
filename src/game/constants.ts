@@ -9,9 +9,8 @@ export const WIN_PATTERNS = [
 
 // AI search depth based on board depth (Single Source of Truth)
 export const getSearchDepth = (boardDepth: number): number => {
-    if (boardDepth === 2) return 8;
-    if (boardDepth === 3) return 6;
-    return 4; // D=4
+    if (boardDepth == 4) return 12;
+    return 14;
 };
 
 // --- Constants for Layout ---
