@@ -2,6 +2,8 @@ import { defineConfig } from 'astro/config'
 import react from '@astrojs/react'
 import tailwindcss from '@tailwindcss/vite'
 import playformInline from '@playform/inline'
+import compress from '@playform/compress'
+import purgecss from 'astro-purgecss'
 
 // https://astro.build/config
 export default defineConfig({
@@ -20,6 +22,8 @@ export default defineConfig({
         publicPath: '/tttt/',
       },
     }),
+    compress(),
+    purgecss(),
   ],
   vite: {
     plugins: [tailwindcss()],
