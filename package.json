@@ -7,9 +7,15 @@
     "dev": "astro dev --host",
     "build": "astro build",
     "lint": "eslint .",
+    "format": "eslint --fix .",
     "preview": "astro preview",
     "preinstall": "npx only-allow pnpm",
     "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,ts,tsx}": [
+      "eslint --fix"
+    ]
   },
   "engines": {
     "pnpm": ">=10"
@@ -37,7 +43,6 @@
     "@types/three": "^0.182.0",
     "babel-plugin-react-compiler": "^1.0.0",
     "eslint": "^9.39.1",
-    "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-compiler": "19.1.0-rc.2",
     "eslint-plugin-react-dom": "^2.8.1",
     "eslint-plugin-react-hooks": "^7.0.1",
@@ -46,7 +51,7 @@
     "globals": "^17.2.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
-    "prettier": "^3.8.1",
+    "neostandard": "^0.12.2",
     "stats.js": "^0.17.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.54.0"

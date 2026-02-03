@@ -4,7 +4,7 @@ export const vertexShader = `
     vUv = uv;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
-`;
+`
 
 export const fragmentShader = `
   varying vec2 vUv;
@@ -380,4 +380,4 @@ export const fragmentShader = `
 
     gl_FragColor = vec4(color, 1.0);
   }
-`;
+`
