@@ -1,0 +1,9 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { HomeScreen } from '../components/HomeScreen';
+---
+<Layout title="Fractal TTT">
+  <div class="w-full h-screen overflow-hidden relative">
+    <HomeScreen client:load />
+  </div>
+</Layout>

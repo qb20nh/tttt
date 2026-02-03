@@ -1,53 +1,49 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
 import type Stats from 'stats.js';
 import { useGameState } from '../game/engine';
 import { Scene3D, type Scene3DHandle } from '../graphics/Scene3D';
-import { GameOverlay } from '../components/GameOverlay';
-import { ConfirmationModal } from '../components/ConfirmationModal';
+import { GameOverlay } from './GameOverlay';
+import { ConfirmationModal } from './ConfirmationModal';
 import { loadGameState } from '../game/persistence';
 import type { GameMode } from '../game/types';
 
-export const GamePage = () => {
-    const navigate = useNavigate();
-    const location = useLocation();
+export const GameClient = () => {
     const sceneRef = useRef<Scene3DHandle>(null);
     const [stats, setStats] = useState<Stats | null>(null);
     const [showMenuConfirm, setShowMenuConfirm] = useState(false);
 
-    // Parse configuration from route state or fallback to persisted defaults
-    // If resuming, we rely on loadGameState inside useGameState (which reads persistence).
-    // If new game, we expect route state.
-    const routeState = location.state as { mode?: GameMode, depth?: number, isNewGame?: boolean } | null;
+    // Parse configuration from URL search params
+    const [config] = useState(() => {
+        const params = new URLSearchParams(window.location.search);
+        const mode = (params.get('mode') as GameMode) || 'PvAI';
+        const depthParam = params.get('depth');
+        const isNewGame = params.get('new') === '1';
 
-    // We pass initialDepth to useGameState. 
-    // If it's a NEW game, we use the selected depth.
-    // If it's a RESUMED game, we ideally want to load the depth from persistence.
-    // However, `useGameState`'s 'depth' arg is primarily for initialization.
-    // Let's check persistence first if we don't have explicit route state.
+        let depth = 4;
+        if (isNewGame && depthParam) {
+            depth = parseInt(depthParam, 10);
+        } else {
+            const saved = loadGameState();
+            depth = saved?.depth || 4;
+        }
 
-    const [depth] = useState(() => {
-        if (routeState?.isNewGame && routeState.depth) return routeState.depth;
-        const saved = loadGameState();
-        return saved?.depth || 4; // Default to 4 if nothing found
+        return { mode, depth, isNewGame };
     });
 
     // Initialize Engine
-    // We pass 'true' for isPlaying because if we are on this route, we ARE playing.
-    const { board, currentPlayer, activeConstraint, winner, handleMove, resetGame, isAiThinking } = useGameState(depth, true);
+    const { board, currentPlayer, activeConstraint, winner, handleMove, resetGame, isAiThinking } = useGameState(config.depth, true);
 
     // Track if we've initialized for this route state
     const hasInitialized = useRef(false);
 
     // Initialize game with route state if it's a new game
     const initializeNewGame = useCallback(() => {
-        if (!hasInitialized.current && routeState?.isNewGame && routeState.mode && routeState.depth) {
-            resetGame(routeState.mode, routeState.depth);
-            // Also reset view for a fresh start
+        if (!hasInitialized.current && config.isNewGame) {
+            resetGame(config.mode, config.depth);
             sceneRef.current?.resetView();
             hasInitialized.current = true;
         }
-    }, [routeState?.isNewGame, routeState?.mode, routeState?.depth, resetGame]);
+    }, [config.isNewGame, config.mode, config.depth, resetGame]);
 
     useEffect(() => {
         initializeNewGame();
@@ -63,8 +59,22 @@ export const GamePage = () => {
         }
     }, []);
 
+    // Prevent accidental page refresh/navigation
+    useEffect(() => {
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            // Only warn if game is in progress (not won yet)
+            if (!winner) {
+                e.preventDefault();
+            }
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [winner]);
+
     const handleReturnToMenu = () => {
-        navigate('/');
+        // Use native navigation for Astro SSG
+        window.location.href = import.meta.env.BASE_URL;
     };
 
     return (
@@ -77,15 +87,14 @@ export const GamePage = () => {
                 winner={winner}
                 onMove={handleMove}
                 statsInstance={stats}
-                depth={depth}
-                initialReset={!!routeState?.isNewGame}
+                depth={config.depth}
+                initialReset={config.isNewGame}
             />
 
             <GameOverlay
                 winner={winner}
                 currentPlayer={currentPlayer}
                 onReset={() => {
-                    // Reset current game (same settings)
                     resetGame();
                     sceneRef.current?.resetView();
                 }}

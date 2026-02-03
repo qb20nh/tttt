@@ -1,0 +1,9 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { GameClient } from '../components/GameClient';
+---
+<Layout title="Play | Fractal TTT">
+  <div class="w-full h-screen overflow-hidden relative">
+    <GameClient client:only="react" />
+  </div>
+</Layout>

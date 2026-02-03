@@ -1,23 +1,24 @@
 import { useEffect } from 'react';
-import { getRenderer } from './renderer';
-import {
-    createGameCamera,
-    createGameTexture,
-    createGameMaterial,
-    createGameScene,
-    createGameMesh
-} from './setup';
-
 // Prewarm Shaders using requestIdleCallback to avoid blocking the main thread
 export const useShaderPrewarm = () => {
     useEffect(() => {
         if (typeof window === 'undefined' || !window.requestIdleCallback) return;
 
-        const handle = window.requestIdleCallback((deadline) => {
+        const handle = window.requestIdleCallback(async (deadline) => {
             // Safety check for idle time
             if (deadline.timeRemaining() < 10) return;
 
             try {
+                // Dynamically import dependencies to avoid bundling Three.js in the main chunk
+                const { getRenderer } = await import('./renderer');
+                const {
+                    createGameCamera,
+                    createGameTexture,
+                    createGameMaterial,
+                    createGameScene,
+                    createGameMesh
+                } = await import('./setup');
+
                 // 1. Get Singleton Renderer
                 const renderer = getRenderer();
 
@@ -62,3 +63,4 @@ export const useShaderPrewarm = () => {
         return () => window.cancelIdleCallback(handle);
     }, []);
 };
+
