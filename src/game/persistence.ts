@@ -289,3 +289,8 @@ export function loadGameState (): SavedState | null {
 export function clearSavedState () {
   localStorage.removeItem(KEY)
 }
+
+export function hasSavedState (): boolean {
+  if (typeof window === 'undefined') return false
+  return !!localStorage.getItem(KEY)
+}

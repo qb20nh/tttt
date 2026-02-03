@@ -3,11 +3,9 @@ import react from '@astrojs/react'
 import tailwindcss from '@tailwindcss/vite'
 import playformInline from '@playform/inline'
 import compress from '@playform/compress'
-import purgecss from 'astro-purgecss'
 
 // https://astro.build/config
 export default defineConfig({
-  site: 'https://cash.github.io',
   base: '/tttt/',
   output: 'static',
   integrations: [
@@ -23,7 +21,6 @@ export default defineConfig({
       },
     }),
     compress(),
-    purgecss(),
   ],
   vite: {
     plugins: [tailwindcss()],
