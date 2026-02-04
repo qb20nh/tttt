@@ -294,3 +294,45 @@ export function hasSavedState (): boolean {
   if (typeof window === 'undefined') return false
   return !!localStorage.getItem(KEY)
 }
+
+// Cache for getSavedGameMeta to prevent infinite loops in useSyncExternalStore
+let cachedMeta: { mode: GameMode; depth: number } | null = null
+let cachedMetaString: string | null = null
+
+export function getSavedGameMeta (): {
+  mode: GameMode
+  depth: number
+} | null {
+  try {
+    const data = localStorage.getItem(KEY)
+    if (!data) {
+      cachedMeta = null
+      cachedMetaString = null
+      return null
+    }
+
+    // Return cached object if string hasn't changed
+    if (data === cachedMetaString && cachedMeta) {
+      return cachedMeta
+    }
+
+    let ptr = 0
+    // Skip Player
+    ptr++
+
+    const modeByte = data.charCodeAt(ptr++)
+    let mode: GameMode = 'PvAI'
+    if (modeByte === 0) mode = 'PvP'
+    else if (modeByte === 2) mode = 'AIvAI'
+
+    const depth = data.charCodeAt(ptr++)
+
+    // Update Cache
+    cachedMeta = { mode, depth }
+    cachedMetaString = data
+
+    return cachedMeta
+  } catch {
+    return null
+  }
+}

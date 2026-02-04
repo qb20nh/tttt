@@ -11,6 +11,11 @@ import {
   getNextConstraint,
 } from './logic'
 import { loadGameState, saveGameState, clearSavedState } from './persistence'
+import {
+  acquireAiWorker,
+  releaseAiWorker,
+  clearAiWorkers,
+} from './ai/worker-pool'
 
 export const useGameState = (
   initialDepth: number = DEFAULT_DEPTH,
@@ -235,23 +240,16 @@ export const useGameState = (
 
   // --- Worker Management ---
   const terminateWorkers = useCallback(() => {
-    if (workerX.current) {
-      workerX.current.terminate()
-      workerX.current = null
-    }
-    if (workerO.current) {
-      workerO.current.terminate()
-      workerO.current = null
-    }
+    releaseAiWorker(workerX.current)
+    releaseAiWorker(workerO.current)
+    workerX.current = null
+    workerO.current = null
   }, [])
 
   const initializeWorkers = useCallback(() => {
     terminateWorkers()
-
-    const createWorker = () =>
-      new Worker(new URL('./ai/worker.ts', import.meta.url), { type: 'module' })
-    workerX.current = createWorker()
-    workerO.current = createWorker()
+    workerX.current = acquireAiWorker()
+    workerO.current = acquireAiWorker()
 
     const handleWorkerMessage = async (e: MessageEvent) => {
       const { type, result, id } = e.data
@@ -270,9 +268,9 @@ export const useGameState = (
         const current = latestState.current
         const d = current.depth
 
-        // Enforce minimum thinking time for UX (500ms)
+        // Enforce minimum thinking time for UX
         const elapsed = performance.now() - aiStartTimeRef.current
-        const minDelay = 500
+        const minDelay = 1000
         const remaining = Math.max(0, minDelay - elapsed)
 
         setTimeout(() => {
@@ -326,8 +324,8 @@ export const useGameState = (
       }
     }
 
-    workerX.current.onmessage = handleWorkerMessage
-    workerO.current.onmessage = handleWorkerMessage
+    if (workerX.current) workerX.current.onmessage = handleWorkerMessage
+    if (workerO.current) workerO.current.onmessage = handleWorkerMessage
   }, [handleMoveInternal, applyMove, terminateWorkers])
 
   // Lifecycle: Init on mount, Terminate on unmount
@@ -366,10 +364,7 @@ export const useGameState = (
   const resetGame = (newMode?: GameMode, newDepth?: number) => {
     clearSavedState()
 
-    // Clear AI memory
-    // Clear AI memory? Workers are fresh.
-    // If we didn't terminate, we'd clear.
-    // But resetGame ensures fresh workers.
+    clearAiWorkers()
     initializeWorkers()
 
     // Invalidate pending searches by incrementing ID

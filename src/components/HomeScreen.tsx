@@ -3,14 +3,18 @@ import type { GameMode } from '../game/types'
 import { useState, useSyncExternalStore } from 'react'
 import { DEFAULT_DEPTH } from '../game/constants'
 import {
-  clearSavedState,
-  hasSavedState,
+  getSavedGameMeta,
 } from '../game/persistence'
 import { useShaderPrewarm } from '../graphics/prewarm'
 import { IntroModal } from './IntroModal'
 import { GameModeButton } from './GameModeButton'
+import { preloadGameClient } from './preload'
 
-export const HomeScreen = () => {
+interface HomeScreenProps {
+  onNavigate?: (path: string) => void
+}
+
+export const HomeScreen = ({ onNavigate }: HomeScreenProps) => {
   // Prewarm shaders asynchronously when on Home Screen
   useShaderPrewarm()
 
@@ -18,24 +22,24 @@ export const HomeScreen = () => {
 
   // Use useSyncExternalStore to safely read localStorage on the client
   // while returning false on the server to prevent hydration mismatch.
-  const hasSavedGame = useSyncExternalStore(
-    () => () => { }, // No subscription needed for this simple check
-    () => hasSavedState(), // Client snapshot
-    () => false // Server snapshot
+  // Check for saved game meta
+  const savedMeta = useSyncExternalStore(
+    () => () => { },
+    () => getSavedGameMeta(),
+    () => null
   )
 
   const [showIntro, setShowIntro] = useState(false)
 
   const depths = [2, 3, 4]
 
-  const handleStartGame = (mode: GameMode, depth: number) => {
-    clearSavedState()
-    window.location.href = `${import.meta.env.BASE_URL}play?mode=${mode}&depth=${depth}&new=1`
+  const getGameUrl = (mode: GameMode, depth: number) => {
+    return `${import.meta.env.BASE_URL}play?mode=${mode}&depth=${depth}&new=1`
   }
 
-  const handleResumeGame = () => {
-    window.location.href = `${import.meta.env.BASE_URL}play`
-  }
+  const resumeUrl = savedMeta
+    ? `${import.meta.env.BASE_URL}play?mode=${savedMeta.mode}&depth=${savedMeta.depth}`
+    : '#'
 
   return (
     <>
@@ -82,13 +86,14 @@ export const HomeScreen = () => {
             {/* Game Modes */}
             <div className='grid md:grid-cols-3 gap-6'>
               {/* Hotseat */}
-              {/* Hotseat */}
               <GameModeButton
                 label='Hotseat'
                 description='Play with a friend on the same device'
                 icon={Users}
                 color='cyan'
-                onClick={() => handleStartGame('PvP', selectedDepth)}
+                href={getGameUrl('PvP', selectedDepth)}
+                onNavigate={onNavigate}
+                onMouseEnter={preloadGameClient}
               />
 
               {/* PvAI */}
@@ -97,7 +102,9 @@ export const HomeScreen = () => {
                 description='Challenge the strategic engine'
                 icon={Bot}
                 color='rose'
-                onClick={() => handleStartGame('PvAI', selectedDepth)}
+                href={getGameUrl('PvAI', selectedDepth)}
+                onNavigate={onNavigate}
+                onMouseEnter={preloadGameClient}
               />
 
               {/* Spectate */}
@@ -106,26 +113,40 @@ export const HomeScreen = () => {
                 description='Watch an automated duel'
                 icon={MonitorPlay}
                 color='purple'
-                onClick={() => handleStartGame('AIvAI', selectedDepth)}
+                href={getGameUrl('AIvAI', selectedDepth)}
+                onNavigate={onNavigate}
+                onMouseEnter={preloadGameClient}
               />
             </div>
 
             {/* Resume Button - Fixed height container to prevent layout shift */}
             <div className='flex items-center justify-center mb-8'>
-              <button
-                onClick={handleResumeGame}
-                disabled={!hasSavedGame}
-                className={`
-                  px-8 md:px-12 py-4 rounded-xl font-bold text-lg transition-colors border shadow-[0_0_20px_rgba(34,211,238,0.1)] active:scale-95 transform tracking-wider
-                  ${hasSavedGame
-                    ? 'bg-slate-900 border-cyan-500/30 text-cyan-400 hover:bg-slate-800 hover:border-cyan-500/50 cursor-pointer'
-                    : 'bg-slate-900/50 border-slate-800 text-slate-600 cursor-not-allowed shadow-none active:scale-100'
-                  }
-                `}
-                title={hasSavedGame ? 'Resume saved game' : 'No Saved Game'}
-              >
-                RESUME GAME
-              </button>
+              {savedMeta
+                ? (
+                  <a
+                    href={resumeUrl}
+                    className='px-8 md:px-12 py-4 rounded-xl font-bold text-lg transition-colors border shadow-[0_0_20px_rgba(34,211,238,0.1)] active:scale-95 transform tracking-wider bg-slate-900 border-cyan-500/30 text-cyan-400 hover:bg-slate-800 hover:border-cyan-500/50 cursor-pointer block text-center'
+                    title={`Resume ${savedMeta.mode} (Depth ${savedMeta.depth})`}
+                    onClick={(e) => {
+                      if (onNavigate) {
+                        e.preventDefault()
+                        onNavigate(resumeUrl)
+                      }
+                    }}
+                    onMouseEnter={preloadGameClient}
+                  >
+                    RESUME GAME
+                  </a>
+                  )
+                : (
+                  <button
+                    disabled
+                    className='px-8 md:px-12 py-4 rounded-xl font-bold text-lg transition-colors border shadow-none active:scale-100 bg-slate-900/50 border-slate-800 text-slate-600 cursor-not-allowed tracking-wider'
+                    title='No Saved Game'
+                  >
+                    RESUME GAME
+                  </button>
+                  )}
             </div>
           </div>
 

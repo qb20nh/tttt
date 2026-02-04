@@ -4,31 +4,35 @@ import { useGameState } from '../game/engine'
 import { Scene3D, type Scene3DHandle } from '../graphics/Scene3D'
 import { GameOverlay } from './GameOverlay'
 import { ConfirmationModal } from './ConfirmationModal'
-import { loadGameState } from '../game/persistence'
+import { preloadHomeScreen } from './preload'
 import type { GameMode } from '../game/types'
 
-export const GameClient = () => {
+interface GameClientProps {
+  mode: GameMode
+  depth: number
+  isNewGame: boolean
+  onNavigate?: (path: string) => void
+}
+
+export const GameClient = ({
+  mode,
+  depth,
+  isNewGame,
+  onNavigate,
+}: GameClientProps) => {
   const sceneRef = useRef<Scene3DHandle>(null)
   const [stats, setStats] = useState<Stats | null>(null)
   const [showMenuConfirm, setShowMenuConfirm] = useState(false)
+  // Defer Scene3D mount to ensure navigation transition finishes first
+  const [isReady, setIsReady] = useState(false)
 
-  // Parse configuration from URL search params
-  const [config] = useState(() => {
-    const params = new URLSearchParams(window.location.search)
-    const mode = (params.get('mode') as GameMode) || 'PvAI'
-    const depthParam = params.get('depth')
-    const isNewGame = params.get('new') === '1'
-
-    let depth = 4
-    if (isNewGame && depthParam) {
-      depth = parseInt(depthParam, 10)
-    } else {
-      const saved = loadGameState()
-      depth = saved?.depth || 4
-    }
-
-    return { mode, depth, isNewGame }
-  })
+  useEffect(() => {
+    // A single frame delay is usually enough to let the browser paint the new page background
+    const timer = requestAnimationFrame(() => {
+      setIsReady(true)
+    })
+    return () => cancelAnimationFrame(timer)
+  }, [])
 
   // Initialize Engine
   const {
@@ -39,19 +43,19 @@ export const GameClient = () => {
     handleMove,
     resetGame,
     isAiThinking,
-  } = useGameState(config.depth, true)
+  } = useGameState(depth, true)
 
   // Track if we've initialized for this route state
   const hasInitialized = useRef(false)
 
   // Initialize game with route state if it's a new game
   const initializeNewGame = useCallback(() => {
-    if (!hasInitialized.current && config.isNewGame) {
-      resetGame(config.mode, config.depth)
+    if (!hasInitialized.current && isNewGame) {
+      resetGame(mode, depth)
       sceneRef.current?.resetView()
       hasInitialized.current = true
     }
-  }, [config.isNewGame, config.mode, config.depth, resetGame])
+  }, [isNewGame, mode, depth, resetGame])
 
   useEffect(() => {
     initializeNewGame()
@@ -67,11 +71,14 @@ export const GameClient = () => {
     }
   }, [])
 
+  // Track intentional navigation to suppress beforeunload
+  const intentionalNav = useRef(false)
+
   // Prevent accidental page refresh/navigation
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      // Only warn if game is in progress (not won yet)
-      if (!winner) {
+      // Only warn if game is in progress (not won yet) AND not intentional
+      if (!winner && !intentionalNav.current) {
         e.preventDefault()
       }
     }
@@ -81,23 +88,38 @@ export const GameClient = () => {
   }, [winner])
 
   const handleReturnToMenu = () => {
-    // Use native navigation for Astro SSG
-    window.location.href = import.meta.env.BASE_URL
+    intentionalNav.current = true
+    if (onNavigate) {
+      onNavigate(import.meta.env.BASE_URL)
+    } else {
+      // Fallback to full page navigation
+      window.location.href = import.meta.env.BASE_URL
+    }
   }
 
   return (
-    <div className='w-full h-screen bg-black text-white overflow-hidden relative selection:bg-cyan-500/30'>
-      <Scene3D
-        ref={sceneRef}
-        board={board}
-        activeConstraint={activeConstraint}
-        currentPlayer={currentPlayer}
-        winner={winner}
-        onMove={handleMove}
-        statsInstance={stats}
-        depth={config.depth}
-        initialReset={config.isNewGame}
-      />
+    <div className='w-full h-dvh bg-black text-white overflow-hidden relative selection:bg-cyan-500/30'>
+      {!isReady && (
+        <div className='absolute inset-0 flex items-center justify-center'>
+          <div className='text-cyan-500/50 animate-pulse font-bold tracking-widest'>
+            Loading...
+          </div>
+        </div>
+      )}
+
+      {isReady && (
+        <Scene3D
+          ref={sceneRef}
+          board={board}
+          activeConstraint={activeConstraint}
+          currentPlayer={currentPlayer}
+          winner={winner}
+          onMove={handleMove}
+          statsInstance={stats}
+          depth={depth}
+          initialReset={isNewGame}
+        />
+      )}
 
       <GameOverlay
         winner={winner}
@@ -122,6 +144,7 @@ export const GameClient = () => {
         cancelText='Stay'
         onConfirm={handleReturnToMenu}
         onCancel={() => setShowMenuConfirm(false)}
+        onHoverConfirm={preloadHomeScreen}
       />
     </div>
   )

@@ -144,6 +144,11 @@ export const Scene3D = ({
   const gameOverRef = useRef(false)
   const [cursorClass, setCursorClass] = useState('cursor-default')
 
+  // Cache canvas size to avoid reflows in input handlers
+  const canvasSize = useRef({ w: 1, h: 1 })
+  // Cache Frustum Size to avoid recalculation
+  const frustumSize = useRef({ w: 1, h: 1 })
+
   // Smooth Transition State
   const playerValRef = useRef(currentPlayer === 'X' ? 0 : 1)
   const targetPlayerValRef = useRef(currentPlayer === 'X' ? 0 : 1)
@@ -162,13 +167,14 @@ export const Scene3D = ({
   }
 
   const updateCamera = useCallback(() => {
-    if (!cameraRef.current || !rendererRef.current) return
-    const w = rendererRef.current.domElement.width
-    const h = rendererRef.current.domElement.height
+    if (!cameraRef.current) return
+    const { w, h } = canvasSize.current
     const aspect = w / h
     const zoom = zoomLevel.current
 
     const { w: frusW, h: frusH } = getFrustumSize(aspect, zoom)
+    frustumSize.current = { w: frusW, h: frusH }
+
     const px = panOffset.current.x
     const py = panOffset.current.y
 
@@ -455,6 +461,8 @@ export const Scene3D = ({
       const w = mountRef.current.clientWidth
       const h = mountRef.current.clientHeight
 
+      canvasSize.current = { w, h }
+
       renderer.setSize(w, h)
       updateCamera()
     }
@@ -540,20 +548,14 @@ export const Scene3D = ({
     }
   }, [activeConstraint, currentPlayer, depth, winner])
 
-  const getUV = (e: React.MouseEvent | MouseEvent) => {
+  const getUV = (e: React.MouseEvent | MouseEvent | { clientX: number, clientY: number }) => {
     if (!rendererRef.current) return { x: -1, y: -1 }
     const rect = rendererRef.current.domElement.getBoundingClientRect()
     // Normalized Device Coordinates (-1 to 1)
     const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1
     const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1
 
-    const w = rendererRef.current.domElement.width
-    const h = rendererRef.current.domElement.height
-    const aspect = w / h
-    const zoom = zoomLevel.current
-
-    // Map NDC back to World Space based on current camera
-    const { w: frusW, h: frusH } = getFrustumSize(aspect, zoom)
+    const { w: frusW, h: frusH } = frustumSize.current
 
     const worldX = ndcX * frusW + panOffset.current.x
     const worldY = ndcY * frusH + panOffset.current.y
@@ -575,12 +577,13 @@ export const Scene3D = ({
     const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1
     const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1
 
-    const w = rendererRef.current.domElement.width
-    const h = rendererRef.current.domElement.height
+    const { w, h } = canvasSize.current
     const aspect = w / h
 
     // Current World Position of mouse
     const oldZoom = zoomLevel.current
+    // Use cached frustum size if available, but for wheel we need strictly synced with oldZoom
+    // Just recalculate to be safe as zoom changes
     const { w: oldFrusW, h: oldFrusH } = getFrustumSize(aspect, oldZoom)
 
     const mouseWorldX = ndcX * oldFrusW + panOffset.current.x
@@ -635,11 +638,10 @@ export const Scene3D = ({
       if (isDragging.current) {
         lastMousePosition.current = { x: e.clientX, y: e.clientY }
 
-        const w = rendererRef.current?.domElement.clientWidth || 1
-        const h = rendererRef.current?.domElement.clientHeight || 1
-        const aspect = w / h
+        const { w, h } = canvasSize.current
+        // const aspect = w / h
 
-        const { w: frusW, h: frusH } = getFrustumSize(aspect, zoomLevel.current)
+        const { w: frusW, h: frusH } = frustumSize.current
 
         // frusW is half-width (left to 0). Total width is 2*frusW.
         const worldWidth = 2 * frusW
@@ -757,10 +759,8 @@ export const Scene3D = ({
 
       if (isDragging.current) {
         // Apply Pan
-        const w = rendererRef.current?.domElement.clientWidth || 1
-        const h = rendererRef.current?.domElement.clientHeight || 1
-        const aspect = w / h
-        const { w: frusW, h: frusH } = getFrustumSize(aspect, zoomLevel.current)
+        const { w, h } = canvasSize.current
+        const { w: frusW, h: frusH } = frustumSize.current
 
         panOffset.current.x -= (dx / w) * (2 * frusW)
         panOffset.current.y += (dy / h) * (2 * frusH)
@@ -789,10 +789,9 @@ export const Scene3D = ({
       const dx = cx - lastMousePosition.current.x
       const dy = cy - lastMousePosition.current.y
 
-      const w = rendererRef.current?.domElement.clientWidth || 1
-      const h = rendererRef.current?.domElement.clientHeight || 1
-      const aspect = w / h
-      const { w: frusW, h: frusH } = getFrustumSize(aspect, zoomLevel.current)
+      const { w, h } = canvasSize.current
+      // const aspect = w / h
+      const { w: frusW, h: frusH } = frustumSize.current
 
       // Inverse pan logic
       panOffset.current.x -= (dx / w) * (2 * frusW)
@@ -819,7 +818,6 @@ export const Scene3D = ({
         clientY: t0.clientY,
       }
 
-      // @ts-expect-error - fake event
       const uv = getUV(fakeEvent)
       if (uv.x >= 0 && uv.x <= 1 && uv.y >= 0 && uv.y <= 1) {
         const mapped = mapUVToCell(uv, depth)
@@ -867,7 +865,7 @@ export const Scene3D = ({
   }, [updateCamera])
 
   return (
-    <div className='h-screen w-screen bg-black overflow-hidden relative'>
+    <div className='h-dvh w-screen bg-black overflow-hidden relative'>
       <div
         ref={mountRef}
         className={`w-full h-full ${cursorClass}`}

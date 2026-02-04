@@ -6,6 +6,7 @@ interface ConfirmationModalProps {
   onCancel: () => void
   confirmText?: string
   cancelText?: string
+  onHoverConfirm?: () => void
 }
 
 export const ConfirmationModal = ({
@@ -16,6 +17,7 @@ export const ConfirmationModal = ({
   onCancel,
   confirmText = 'Confirm',
   cancelText = 'Cancel',
+  onHoverConfirm,
 }: ConfirmationModalProps) => {
   if (!isOpen) return null
 
@@ -34,6 +36,7 @@ export const ConfirmationModal = ({
           </button>
           <button
             onClick={onConfirm}
+            onMouseEnter={onHoverConfirm}
             className='px-4 py-2 bg-rose-500 hover:bg-rose-600 text-white rounded-lg transition-colors cursor-pointer'
           >
             {confirmText}
