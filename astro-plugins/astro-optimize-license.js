@@ -2,12 +2,14 @@
  * Astro integration to deduplicate license/copyright comments per output file.
  * Applies only size-reducing transforms.
  */
-import fs from 'node:fs'
-import path from 'node:path'
 import {
-  findFiles,
+  collectFilesByExts,
+  readTextFile,
   scanStringLiteral,
   scanTemplateLiteral,
+  logSavedBytes,
+  recordSavings,
+  writeFileIfSmaller,
 } from './utils.js'
 
 /** @returns {import('astro').AstroIntegration} */
@@ -17,25 +19,23 @@ export function optimizeLicense () {
     hooks: {
       'astro:build:done': async ({ dir }) => {
         const distPath = dir.pathname
-        const jsFiles = findFiles(distPath, '.js')
-        const cssFiles = findFiles(distPath, '.css')
-        const files = [...jsFiles, ...cssFiles]
+        const files = collectFilesByExts(distPath, ['.js', '.css'])
         let totalSaved = 0
 
         console.log('[optimize-license] Removing duplicate license notices...')
 
         for (const file of files) {
-          const original = fs.readFileSync(file, 'utf-8')
+          const original = readTextFile(file)
           const optimized = dedupeLicenseComments(original)
-          if (optimized.length < original.length) {
-            fs.writeFileSync(file, optimized)
-            const saved = original.length - optimized.length
+          const saved = writeFileIfSmaller(file, original, optimized)
+          if (saved > 0) {
             totalSaved += saved
-            console.log(`\x1b[32m[optimize-license] ${path.relative(distPath, file)}: saved ${saved} bytes\x1b[0m`)
+            logSavedBytes('optimize-license', distPath, file, saved)
           }
         }
 
         console.log(`\x1b[32m[optimize-license] Total saved: ${totalSaved} bytes\x1b[0m`)
+        recordSavings('optimize-license', totalSaved)
       },
     },
   }

@@ -4,10 +4,12 @@
  */
 
 import { preloadAiWorkers } from '../game/ai/worker-pool'
+import { queueShaderPrewarm } from '../graphics/prewarm'
 
 export const preloadGameClient = () => {
   import('./GameClient')
   preloadAiWorkers()
+  queueShaderPrewarm()
 }
 
 export const preloadHomeScreen = () => {

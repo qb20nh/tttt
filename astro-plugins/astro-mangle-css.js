@@ -5,41 +5,58 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { findFiles } from './utils.js'
+import {
+  collectFilesByExts,
+  applyIfSmaller,
+  getByteLength,
+  readTextFile,
+  recordSavings,
+  shortName,
+} from './utils.js'
+
+const ALPHABET_ALPHA = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 /** @returns {import('astro').AstroIntegration} */
-export function cssMangle () {
+export function mangleCSS () {
   return {
-    name: 'css-mangle',
+    name: 'mangle-css',
     hooks: {
       'astro:build:done': async ({ dir }) => {
         const distPath = dir.pathname
 
-        const htmlFiles = findFiles(distPath, '.html')
-        const cssFiles = findFiles(distPath, '.css')
-        const jsFiles = findFiles(distPath, '.js')
+        const htmlFiles = collectFilesByExts(distPath, ['.html'])
+        const cssFiles = collectFilesByExts(distPath, ['.css'])
+        const jsFiles = collectFilesByExts(distPath, ['.js'])
         const allFiles = [...htmlFiles, ...cssFiles, ...jsFiles]
+        const fileContents = new Map()
+        for (const file of allFiles) {
+          fileContents.set(file, readTextFile(file))
+        }
 
         const varMap = new Map()
         const classMap = new Map()
         const cssClassMap = new Map()
+        const idMap = new Map()
+        const cssIdMap = new Map()
 
         let varCounter = 0
         let classCounter = 0
+        let idCounter = 0
         let varMangleCount = 0
         let classMangleCount = 0
+        let idMangleCount = 0
 
         const getShortVar = () => {
-          const name = shortAlphabetName(varCounter++)
+          const name = shortName(varCounter++, ALPHABET_ALPHA)
           return `--${name}`
         }
 
-        console.log('[css-mangle] Minifying CSS classes and variables...')
+        console.log('[mangle-css] Minifying CSS classes and variables...')
 
         // 1. Collect all CSS variable names to shorten (include JS usage)
         const varNames = new Set()
         for (const file of [...cssFiles, ...htmlFiles, ...jsFiles]) {
-          const content = fs.readFileSync(file, 'utf-8')
+          const content = fileContents.get(file)
           const varMatches = content.match(/--[a-zA-Z0-9_-]+/g)
           if (varMatches) {
             for (const v of varMatches) varNames.add(v)
@@ -50,12 +67,12 @@ export function cssMangle () {
         const usedShortVars = new Set()
         const sortedVarNames = [...varNames].sort((a, b) => b.length - a.length || a.localeCompare(b))
         for (const v of sortedVarNames) {
-          if (v.length <= 5) continue
+          if (getByteLength(v) <= 5) continue
           let short = getShortVar()
           while (reservedVars.has(short) || usedShortVars.has(short)) {
             short = getShortVar()
           }
-          if (short.length >= v.length) continue
+          if (getByteLength(short) >= getByteLength(v)) continue
           varMap.set(v, short)
           usedShortVars.add(short)
           varMangleCount++
@@ -67,7 +84,7 @@ export function cssMangle () {
         const classPairs = []
         const classNames = new Set()
         for (const file of cssFiles) {
-          const content = fs.readFileSync(file, 'utf-8')
+          const content = fileContents.get(file)
           const classes = collectCssClasses(content)
           for (const { escaped, unescaped } of classes) {
             classPairs.push({ escaped, unescaped })
@@ -75,23 +92,65 @@ export function cssMangle () {
           }
         }
 
-        // 3. Collect class usage from HTML and JS to avoid mangling dynamic-only classes
-        const usedClassNames = new Set()
-        for (const file of htmlFiles) {
-          const content = fs.readFileSync(file, 'utf-8')
-          const classMatches = content.matchAll(/\bclass=(["'])([^"']*)\1/gi)
-          for (const match of classMatches) {
-            collectClassTokensFromString(match[2], classNames, usedClassNames)
+        // 3. Collect all CSS id names from stylesheets
+        const idPairs = []
+        const idNames = new Set()
+        for (const file of cssFiles) {
+          const content = fileContents.get(file)
+          const ids = collectCssIds(content)
+          for (const { escaped, unescaped } of ids) {
+            idPairs.push({ escaped, unescaped })
+            idNames.add(unescaped)
           }
+        }
+
+        // 4. Collect class/id usage from HTML and JS to avoid mangling dynamic-only tokens
+        const usedClassNames = new Set()
+        const usedIdNames = new Set()
+        const htmlIdNames = new Set()
+        for (const file of htmlFiles) {
+          const content = fileContents.get(file)
+          const classMatches = content.matchAll(CLASS_ATTR_RE)
+          for (const match of classMatches) {
+            const value = match[1] ?? match[2] ?? match[3] ?? ''
+            collectClassTokensFromString(value, classNames, usedClassNames)
+          }
+
+          const idMatches = content.matchAll(ID_ATTR_RE)
+          for (const match of idMatches) {
+            const value = match[2] ?? match[3] ?? match[4] ?? ''
+            collectIdTokensFromString(value, idNames, usedIdNames, htmlIdNames)
+          }
+
+          const refAttrMatches = content.matchAll(ID_REF_ATTR_RE)
+          for (const match of refAttrMatches) {
+            const value = match[3] ?? match[4] ?? match[5] ?? ''
+            collectIdTokensFromString(value, idNames, usedIdNames)
+          }
+
+          const hrefMatches = content.matchAll(/\b(?:xlink:href|href)=(["'])#([^"']+)\1/gi)
+          for (const match of hrefMatches) {
+            const token = match[2]
+            if (idNames.has(token)) usedIdNames.add(token)
+          }
+
+          const urlMatches = content.matchAll(/url\(\s*(['"])?#([^'")\s]+)\1\s*\)/gi)
+          for (const match of urlMatches) {
+            const token = match[2]
+            if (idNames.has(token)) usedIdNames.add(token)
+          }
+
           content.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, (m, body) => {
             collectUsedClassesFromJs(body, classNames, usedClassNames)
+            collectUsedIdsFromJs(body, idNames, usedIdNames)
             return m
           })
         }
 
         for (const file of jsFiles) {
-          const content = fs.readFileSync(file, 'utf-8')
+          const content = fileContents.get(file)
           collectUsedClassesFromJs(content, classNames, usedClassNames)
+          collectUsedIdsFromJs(content, idNames, usedIdNames)
         }
 
         const reservedClasses = new Set(usedClassNames)
@@ -101,7 +160,7 @@ export function cssMangle () {
           let candidate = null
           let candidateCounter = classCounter
           while (true) {
-            const short = shortAlphabetName(candidateCounter)
+            const short = shortName(candidateCounter, ALPHABET_ALPHA)
             if (reservedClasses.has(short) || usedShortClasses.has(short)) {
               candidateCounter++
               continue
@@ -110,7 +169,7 @@ export function cssMangle () {
             break
           }
 
-          if (!candidate || candidate.length >= name.length) {
+          if (!candidate || getByteLength(candidate) >= getByteLength(name)) {
             classCounter = candidateCounter
             continue
           }
@@ -121,8 +180,35 @@ export function cssMangle () {
           classMangleCount++
         }
 
+        const reservedIds = new Set([...idNames, ...htmlIdNames])
+        const usedShortIds = new Set()
+        const sortedIdNames = [...usedIdNames].sort((a, b) => b.length - a.length || a.localeCompare(b))
+        for (const name of sortedIdNames) {
+          let candidate = null
+          let candidateCounter = idCounter
+          while (true) {
+            const short = shortName(candidateCounter, ALPHABET_ALPHA)
+            if (reservedIds.has(short) || usedShortIds.has(short)) {
+              candidateCounter++
+              continue
+            }
+            candidate = short
+            break
+          }
+
+          if (!candidate || getByteLength(candidate) >= getByteLength(name)) {
+            idCounter = candidateCounter
+            continue
+          }
+
+          idMap.set(name, candidate)
+          usedShortIds.add(candidate)
+          idCounter = candidateCounter + 1
+          idMangleCount++
+        }
+
         console.log(
-          `[css-mangle] Mapped ${varMangleCount} variables and ${classMangleCount} classes.`
+          `[mangle-css] Mapped ${varMangleCount} variables, ${classMangleCount} classes, and ${idMangleCount} ids.`
         )
 
         for (const { escaped, unescaped } of classPairs) {
@@ -131,37 +217,48 @@ export function cssMangle () {
           cssClassMap.set(escaped, cssEscape(short))
         }
 
+        for (const { escaped, unescaped } of idPairs) {
+          const short = idMap.get(unescaped)
+          if (!short) continue
+          cssIdMap.set(escaped, cssEscape(short))
+        }
+
         let totalSaved = 0
 
         // 3. Transformation
         for (const file of allFiles) {
-          let content = fs.readFileSync(file, 'utf-8')
-          const originalLength = content.length
-          const originalContent = content
+          const originalContent = fileContents.get(file)
+          const originalBytes = getByteLength(originalContent)
+          let content = originalContent
 
           if (file.endsWith('.css')) {
-            content = processCSS(content, sortedVarTokens, cssClassMap)
+            content = processCSS(content, sortedVarTokens, cssClassMap, cssIdMap)
           } else if (file.endsWith('.html')) {
             // Protect JS and Style blocks
             const scriptBlocks = []
             content = content.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (m, attrs, body) => {
-              const processed = replaceInJs(body, classMap, sortedVarTokens)
+              const processed = replaceInJs(body, classMap, sortedVarTokens, idMap)
               scriptBlocks.push(`<script${attrs}>${processed}</script>`)
               return `__JS${scriptBlocks.length - 1}__`
             })
 
             const styleBlocks = []
             content = content.replace(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi, (m, attrs, body) => {
-              const processed = processCSS(body, sortedVarTokens, cssClassMap)
+              const processed = processCSS(body, sortedVarTokens, cssClassMap, cssIdMap)
               styleBlocks.push(`<style${attrs}>${processed}</style>`)
               return `__CSS${styleBlocks.length - 1}__`
             })
 
-            // Mangle classes in class attributes
-            content = content.replace(/\bclass=(["'])([^"']*)\1/gi, (match, quote, classes) => {
+            // Mangle classes in class attributes (quoted or unquoted)
+            content = content.replace(CLASS_ATTR_RE, (match, dq, sq, uq) => {
+              const classes = dq ?? sq ?? uq ?? ''
               const replaced = replaceClassTokensInString(classes, classMap)
-              return `class=${quote}${replaced}${quote}`
+              if (dq != null) return `class="${replaced}"`
+              if (sq != null) return `class='${replaced}'`
+              return `class=${replaced}`
             })
+
+            content = replaceHtmlIdReferences(content, idMap)
 
             // Replace CSS variables globally in HTML
             for (const [o, s] of sortedVarTokens) {
@@ -175,46 +272,39 @@ export function cssMangle () {
             // Final HTML minification
             content = applyIfSmaller(content, minifyHtml(content))
           } else if (file.endsWith('.js')) {
-            content = applyIfSmaller(content, replaceInJs(content, classMap, sortedVarTokens))
+            content = applyIfSmaller(content, replaceInJs(content, classMap, sortedVarTokens, idMap))
           }
 
-          if (content.length >= originalLength) {
+          let nextBytes = getByteLength(content)
+          if (nextBytes >= originalBytes) {
             content = originalContent
+            nextBytes = originalBytes
           }
 
-          if (content.length < originalLength) {
+          if (nextBytes < originalBytes) {
+            const saved = originalBytes - nextBytes
             fs.writeFileSync(file, content)
-            totalSaved += (originalLength - content.length)
-            console.log(`\x1b[32m[css-mangle] ${path.relative(distPath, file)}: saved ${originalLength - content.length} bytes\x1b[0m`)
+            totalSaved += saved
+            console.log(`\x1b[32m[mangle-css] ${path.relative(distPath, file)}: saved ${saved} bytes\x1b[0m`)
           }
         }
 
-        console.log(`\x1b[32m[css-mangle] Total saved: ${totalSaved} bytes\x1b[0m`)
+        console.log(`\x1b[32m[mangle-css] Total saved: ${totalSaved} bytes\x1b[0m`)
+        recordSavings('mangle-css', totalSaved)
       }
     }
   }
 }
 
-function shortAlphabetName (index) {
-  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
-  let name = ''
-  let n = index
-  do {
-    name = chars[n % 52] + name
-    n = Math.floor(n / 52) - 1
-  } while (n >= 0)
-  return name
-}
-
-function applyIfSmaller (original, next) {
-  return next.length < original.length ? next : original
-}
-
-function processCSS (css, varTokens, cssClassMap) {
+function processCSS (css, varTokens, cssClassMap, cssIdMap) {
   let res = css
 
   if (cssClassMap.size > 0) {
     res = applyIfSmaller(res, replaceCssClasses(res, cssClassMap))
+  }
+
+  if (cssIdMap.size > 0) {
+    res = applyIfSmaller(res, replaceCssIds(res, cssIdMap))
   }
 
   if (varTokens.length > 0) {
@@ -278,8 +368,8 @@ function flattenStaticCalcs (css) {
     const inner = css.slice(start, j - 1)
     const replacement = tryEvaluateCalc(inner)
     const original = css.slice(idx, j)
-    if (replacement && replacement.length < original.length) {
-      out += replacement
+    if (replacement) {
+      out += applyIfSmaller(original, replacement)
     } else {
       out += original
     }
@@ -579,8 +669,8 @@ function convertOklchToHex (css) {
     const inner = css.slice(start, j - 1)
     const replacement = oklchToHex(inner)
     const original = css.slice(idx, j)
-    if (replacement && replacement.length < original.length) {
-      out += replacement
+    if (replacement) {
+      out += applyIfSmaller(original, replacement)
     } else {
       out += original
     }
@@ -699,7 +789,7 @@ function rgbToHex (r, g, b, alpha) {
 
   const full = '#' + byteToHex(r8) + byteToHex(g8) + byteToHex(b8) + (a8 == null ? '' : byteToHex(a8))
   const short = tryShortHex(r8, g8, b8, a8)
-  if (short && short.length < full.length) return short
+  if (short && getByteLength(short) < getByteLength(full)) return short
   return full
 }
 
@@ -759,6 +849,42 @@ function replaceCssClasses (css, cssClassMap) {
   return out
 }
 
+function replaceCssIds (css, cssIdMap) {
+  let out = ''
+  let i = 0
+  while (i < css.length) {
+    const ch = css[i]
+    if (ch !== '#') {
+      out += ch
+      i++
+      continue
+    }
+
+    const parsed = readCssIdent(css, i + 1)
+    if (!parsed) {
+      out += ch
+      i++
+      continue
+    }
+
+    const { ident, end } = parsed
+    const unescaped = unescapeCssIdent(ident)
+    if (unescaped && isHexColorIdent(unescaped)) {
+      out += '#' + ident
+      i = end
+      continue
+    }
+    const replacement = cssIdMap.get(ident)
+    if (replacement) {
+      out += '#' + replacement
+    } else {
+      out += '#' + ident
+    }
+    i = end
+  }
+  return out
+}
+
 function collectCssClasses (css) {
   const result = []
   const seen = new Set()
@@ -776,6 +902,33 @@ function collectCssClasses (css) {
     const { ident, end } = parsed
     const unescaped = unescapeCssIdent(ident)
     if (unescaped && !/^\d/.test(unescaped)) {
+      if (!seen.has(ident)) {
+        seen.add(ident)
+        result.push({ escaped: ident, unescaped })
+      }
+    }
+    i = end
+  }
+  return result
+}
+
+function collectCssIds (css) {
+  const result = []
+  const seen = new Set()
+  let i = 0
+  while (i < css.length) {
+    if (css[i] !== '#') {
+      i++
+      continue
+    }
+    const parsed = readCssIdent(css, i + 1)
+    if (!parsed) {
+      i++
+      continue
+    }
+    const { ident, end } = parsed
+    const unescaped = unescapeCssIdent(ident)
+    if (unescaped && !/^\d/.test(unescaped) && !isHexColorIdent(unescaped)) {
       if (!seen.has(ident)) {
         seen.add(ident)
         result.push({ escaped: ident, unescaped })
@@ -878,6 +1031,25 @@ function cssEscape (value) {
 
 const CLASS_TOKEN_RE = /^[!A-Za-z0-9_:\-./%#[\](),=+*&@?<>|~^$]+$/
 const CLASS_TOKEN_GLOBAL_RE = /[!A-Za-z0-9_:\-./%#[\](),=+*&@?<>|~^$]+/g
+const CLASS_ATTR_RE = /\bclass=(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi
+const ID_REF_ATTRS = [
+  'for',
+  'form',
+  'list',
+  'headers',
+  'aria-labelledby',
+  'aria-describedby',
+  'aria-controls',
+  'aria-owns',
+  'aria-activedescendant',
+  'aria-flowto',
+]
+const ID_REF_ATTR_RE = new RegExp(
+  `(^|[^\\w:-])(${ID_REF_ATTRS.join('|')})=(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`,
+  'gi'
+)
+const ID_ATTR_SELECTOR_RE = /\[id\s*=\s*(['"]?)([^'"\]]+)\1\]/gi
+const ID_ATTR_RE = /(^|[^\w:-])id=(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi
 
 function normalizeClassWhitespace (str) {
   return str.replace(/\\[nrt]/g, ' ')
@@ -910,7 +1082,172 @@ function replaceClassTokensInString (str, classMap) {
   return str.replace(CLASS_TOKEN_GLOBAL_RE, (token) => classMap.get(token) || token)
 }
 
-function replaceLiteralContent (str, classMap, varTokens) {
+function collectIdTokensFromString (str, knownIds, usedIds, htmlIds) {
+  if (!str) return
+  const tokens = str.trim().split(/\s+/).filter(Boolean)
+  if (tokens.length === 0) return
+  for (const token of tokens) {
+    if (htmlIds) htmlIds.add(token)
+    if (knownIds && knownIds.has(token)) {
+      usedIds.add(token)
+    }
+  }
+}
+
+function collectIdsFromHashSelectors (str, knownIds, outSet) {
+  if (!str || !knownIds || knownIds.size === 0) return
+  let i = 0
+  while (i < str.length) {
+    const idx = str.indexOf('#', i)
+    if (idx === -1) break
+    const parsed = readCssIdent(str, idx + 1)
+    if (!parsed) {
+      i = idx + 1
+      continue
+    }
+    const { ident, end } = parsed
+    const unescaped = unescapeCssIdent(ident)
+    if (unescaped && !isHexColorIdent(unescaped) && knownIds.has(unescaped)) outSet.add(unescaped)
+    i = end
+  }
+}
+
+function collectIdsFromAttributeSelectors (str, knownIds, outSet) {
+  if (!str || !knownIds || knownIds.size === 0) return
+  for (const match of str.matchAll(ID_ATTR_SELECTOR_RE)) {
+    const token = match[2]
+    if (knownIds.has(token)) outSet.add(token)
+  }
+}
+
+function collectIdsFromSelectorString (str, knownIds, outSet) {
+  if (!str) return
+  if (knownIds.has(str)) outSet.add(str)
+  collectIdsFromHashSelectors(str, knownIds, outSet)
+  collectIdsFromAttributeSelectors(str, knownIds, outSet)
+}
+
+function isHexColorString (value) {
+  return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(value)
+}
+
+function isHexColorIdent (value) {
+  return /^(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(value)
+}
+
+function replaceIdAttributeSelectors (str, idMap) {
+  return str.replace(ID_ATTR_SELECTOR_RE, (match, quote, value) => {
+    const next = idMap.get(value)
+    if (!next) return match
+    const q = quote || ''
+    return `[id=${q}${next}${q}]`
+  })
+}
+
+function replaceIdHashSelectors (str, idMap) {
+  let out = ''
+  let i = 0
+  while (i < str.length) {
+    const idx = str.indexOf('#', i)
+    if (idx === -1) {
+      out += str.slice(i)
+      break
+    }
+    out += str.slice(i, idx)
+    const parsed = readCssIdent(str, idx + 1)
+    if (!parsed) {
+      out += '#'
+      i = idx + 1
+      continue
+    }
+    const { ident, end } = parsed
+    const unescaped = unescapeCssIdent(ident)
+    if (unescaped && isHexColorIdent(unescaped)) {
+      out += '#' + ident
+      i = end
+      continue
+    }
+    const next = idMap.get(unescaped)
+    if (next) {
+      out += '#' + cssEscape(next)
+    } else {
+      out += '#' + ident
+    }
+    i = end
+  }
+  return out
+}
+
+function replaceIdTokensInString (str, idMap) {
+  if (!str || idMap.size === 0) return str
+  if (isHexColorString(str)) return str
+
+  if (idMap.has(str)) return idMap.get(str)
+
+  let res = str
+  res = replaceIdAttributeSelectors(res, idMap)
+  res = replaceIdHashSelectors(res, idMap)
+
+  return res
+}
+
+function replaceIdList (value, idMap) {
+  const tokens = value.trim().split(/\s+/).filter(Boolean)
+  if (tokens.length === 0) return value
+  let changed = false
+  const replaced = tokens.map((token) => {
+    const next = idMap.get(token)
+    if (next) {
+      changed = true
+      return next
+    }
+    return token
+  })
+  return changed ? replaced.join(' ') : value
+}
+
+function replaceHtmlIdReferences (html, idMap) {
+  if (!idMap || idMap.size === 0) return html
+  let res = html
+
+  res = res.replace(ID_ATTR_RE, (match, prefix, dq, sq, uq) => {
+    const value = dq ?? sq ?? uq ?? ''
+    const replaced = replaceIdList(value, idMap)
+    if (dq != null) return `${prefix}id="${replaced}"`
+    if (sq != null) return `${prefix}id='${replaced}'`
+    return `${prefix}id=${replaced}`
+  })
+
+  res = res.replace(ID_REF_ATTR_RE, (match, prefix, attr, dq, sq, uq) => {
+    const value = dq ?? sq ?? uq ?? ''
+    const replaced = replaceIdList(value, idMap)
+    if (dq != null) return `${prefix}${attr}="${replaced}"`
+    if (sq != null) return `${prefix}${attr}='${replaced}'`
+    return `${prefix}${attr}=${replaced}`
+  })
+
+  res = res.replace(/\b(xlink:href|href)=(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi, (match, attr, dq, sq, uq) => {
+    const value = dq ?? sq ?? uq ?? ''
+    if (!value.startsWith('#')) return match
+    const next = idMap.get(value.slice(1))
+    if (!next) return match
+    const replaced = `#${next}`
+    if (dq != null) return `${attr}="${replaced}"`
+    if (sq != null) return `${attr}='${replaced}'`
+    return `${attr}=${replaced}`
+  })
+
+  res = res.replace(/url\(\s*(['"])?#([^'")\s]+)\1\s*\)/gi, (match, quote, value) => {
+    const next = idMap.get(value)
+    if (!next) return match
+    const q = quote || ''
+    return `url(${q}#${next}${q})`
+  })
+
+  return res
+}
+
+function replaceLiteralContent (str, classMap, varTokens, idMap) {
   let res = str
   if (varTokens.length > 0) {
     for (const [o, s] of varTokens) {
@@ -920,11 +1257,14 @@ function replaceLiteralContent (str, classMap, varTokens) {
   if (classMap.size > 0) {
     res = replaceClassTokensInString(res, classMap)
   }
+  if (idMap && idMap.size > 0) {
+    res = replaceIdTokensInString(res, idMap)
+  }
   return res
 }
 
-function replaceInJs (code, classMap, varTokens) {
-  if (classMap.size === 0 && varTokens.length === 0) return code
+function replaceInJs (code, classMap, varTokens, idMap) {
+  if (classMap.size === 0 && varTokens.length === 0 && (!idMap || idMap.size === 0)) return code
   let out = ''
   let i = 0
   while (i < code.length) {
@@ -953,14 +1293,14 @@ function replaceInJs (code, classMap, varTokens) {
     }
 
     if (ch === '"' || ch === "'") {
-      const res = readJsString(code, i, classMap, varTokens)
+      const res = readJsString(code, i, classMap, varTokens, idMap)
       out += res.text
       i = res.end
       continue
     }
 
     if (ch === '`') {
-      const res = readJsTemplate(code, i, classMap, varTokens)
+      const res = readJsTemplate(code, i, classMap, varTokens, idMap)
       out += res.text
       i = res.end
       continue
@@ -1008,7 +1348,44 @@ function collectUsedClassesFromJs (code, knownClasses, outSet) {
   }
 }
 
-function readJsString (code, start, classMap, varTokens) {
+function collectUsedIdsFromJs (code, knownIds, outSet) {
+  if (!knownIds || knownIds.size === 0) return
+  let i = 0
+  while (i < code.length) {
+    const ch = code[i]
+
+    if (ch === '/' && code[i + 1] === '/') {
+      const end = code.indexOf('\n', i + 2)
+      if (end === -1) return
+      i = end + 1
+      continue
+    }
+
+    if (ch === '/' && code[i + 1] === '*') {
+      const end = code.indexOf('*/', i + 2)
+      if (end === -1) return
+      i = end + 2
+      continue
+    }
+
+    if (ch === '"' || ch === "'") {
+      const res = readJsStringValue(code, i)
+      collectIdsFromSelectorString(res.value, knownIds, outSet)
+      i = res.end
+      continue
+    }
+
+    if (ch === '`') {
+      const res = readJsTemplateValuesForIds(code, i, knownIds, outSet)
+      i = res.end
+      continue
+    }
+
+    i++
+  }
+}
+
+function readJsString (code, start, classMap, varTokens, idMap) {
   const quote = code[start]
   let i = start + 1
   let value = ''
@@ -1023,7 +1400,7 @@ function readJsString (code, start, classMap, varTokens) {
     value += ch
     i++
   }
-  const replaced = replaceLiteralContent(value, classMap, varTokens)
+  const replaced = replaceLiteralContent(value, classMap, varTokens, idMap)
   return { text: quote + replaced + quote, end: Math.min(i + 1, code.length) }
 }
 
@@ -1045,7 +1422,7 @@ function readJsStringValue (code, start) {
   return { value, end: Math.min(i + 1, code.length) }
 }
 
-function readJsTemplate (code, start, classMap, varTokens) {
+function readJsTemplate (code, start, classMap, varTokens, idMap) {
   let i = start + 1
   let out = '`'
   let segment = ''
@@ -1060,17 +1437,17 @@ function readJsTemplate (code, start, classMap, varTokens) {
     }
 
     if (ch === '`') {
-      out += replaceLiteralContent(segment, classMap, varTokens)
+      out += replaceLiteralContent(segment, classMap, varTokens, idMap)
       out += '`'
       return { text: out, end: i + 1 }
     }
 
     if (ch === '$' && code[i + 1] === '{') {
-      out += replaceLiteralContent(segment, classMap, varTokens)
+      out += replaceLiteralContent(segment, classMap, varTokens, idMap)
       segment = ''
       out += '${'
       i += 2
-      const expr = readJsTemplateExpression(code, i, classMap, varTokens)
+      const expr = readJsTemplateExpression(code, i, classMap, varTokens, idMap)
       out += expr.text
       i = expr.end
       continue
@@ -1080,7 +1457,7 @@ function readJsTemplate (code, start, classMap, varTokens) {
     i++
   }
 
-  out += replaceLiteralContent(segment, classMap, varTokens)
+  out += replaceLiteralContent(segment, classMap, varTokens, idMap)
   return { text: out, end: i }
 }
 
@@ -1117,7 +1494,40 @@ function readJsTemplateValues (code, start, knownClasses, outSet) {
   return { end: i }
 }
 
-function readJsTemplateExpression (code, start, classMap, varTokens) {
+function readJsTemplateValuesForIds (code, start, knownIds, outSet) {
+  let i = start + 1
+  let segment = ''
+  while (i < code.length) {
+    const ch = code[i]
+
+    if (ch === '\\') {
+      segment += ch + (code[i + 1] || '')
+      i += 2
+      continue
+    }
+
+    if (ch === '`') {
+      collectIdsFromSelectorString(segment, knownIds, outSet)
+      return { end: i + 1 }
+    }
+
+    if (ch === '$' && code[i + 1] === '{') {
+      collectIdsFromSelectorString(segment, knownIds, outSet)
+      segment = ''
+      i += 2
+      const expr = readJsTemplateExpressionValuesForIds(code, i, knownIds, outSet)
+      i = expr.end
+      continue
+    }
+
+    segment += ch
+    i++
+  }
+  collectIdsFromSelectorString(segment, knownIds, outSet)
+  return { end: i }
+}
+
+function readJsTemplateExpression (code, start, classMap, varTokens, idMap) {
   let i = start
   let out = ''
   let depth = 1
@@ -1148,14 +1558,14 @@ function readJsTemplateExpression (code, start, classMap, varTokens) {
     }
 
     if (ch === '"' || ch === "'") {
-      const res = readJsString(code, i, classMap, varTokens)
+      const res = readJsString(code, i, classMap, varTokens, idMap)
       out += res.text
       i = res.end
       continue
     }
 
     if (ch === '`') {
-      const res = readJsTemplate(code, i, classMap, varTokens)
+      const res = readJsTemplate(code, i, classMap, varTokens, idMap)
       out += res.text
       i = res.end
       continue
@@ -1236,4 +1646,57 @@ function readJsTemplateExpressionValues (code, start, knownClasses, outSet) {
   return { end: i }
 }
 
-export default cssMangle
+function readJsTemplateExpressionValuesForIds (code, start, knownIds, outSet) {
+  let i = start
+  let depth = 1
+
+  while (i < code.length) {
+    const ch = code[i]
+
+    if (ch === '/' && code[i + 1] === '/') {
+      const end = code.indexOf('\n', i + 2)
+      if (end === -1) return { end: code.length }
+      i = end + 1
+      continue
+    }
+
+    if (ch === '/' && code[i + 1] === '*') {
+      const end = code.indexOf('*/', i + 2)
+      if (end === -1) return { end: code.length }
+      i = end + 2
+      continue
+    }
+
+    if (ch === '"' || ch === "'") {
+      const res = readJsStringValue(code, i)
+      collectIdsFromSelectorString(res.value, knownIds, outSet)
+      i = res.end
+      continue
+    }
+
+    if (ch === '`') {
+      const res = readJsTemplateValuesForIds(code, i, knownIds, outSet)
+      i = res.end
+      continue
+    }
+
+    if (ch === '{') {
+      depth++
+      i++
+      continue
+    }
+
+    if (ch === '}') {
+      depth--
+      i++
+      if (depth === 0) break
+      continue
+    }
+
+    i++
+  }
+
+  return { end: i }
+}
+
+export default mangleCSS

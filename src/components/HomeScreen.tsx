@@ -1,11 +1,10 @@
-import { Users, Bot, MonitorPlay, Layers } from 'lucide-react'
+import { Users, Bot, MonitorPlay, Layers } from 'lucide-preact'
 import type { GameMode } from '../game/types'
 import { useState, useSyncExternalStore } from 'react'
 import { DEFAULT_DEPTH } from '../game/constants'
 import {
   getSavedGameMeta,
 } from '../game/persistence'
-import { useShaderPrewarm } from '../graphics/prewarm'
 import { IntroModal } from './IntroModal'
 import { GameModeButton } from './GameModeButton'
 import { preloadGameClient } from './preload'
@@ -15,9 +14,6 @@ interface HomeScreenProps {
 }
 
 export const HomeScreen = ({ onNavigate }: HomeScreenProps) => {
-  // Prewarm shaders asynchronously when on Home Screen
-  useShaderPrewarm()
-
   const [selectedDepth, setSelectedDepth] = useState(DEFAULT_DEPTH)
 
   // Use useSyncExternalStore to safely read localStorage on the client

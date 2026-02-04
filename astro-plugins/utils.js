@@ -18,6 +18,84 @@ export function findFiles (dir, ext) {
   return files
 }
 
+export function collectFilesByExts (dir, exts) {
+  const out = new Set()
+  for (const ext of exts) {
+    for (const file of findFiles(dir, ext)) {
+      out.add(file)
+    }
+  }
+  return [...out]
+}
+
+export function readTextFile (file) {
+  return fs.readFileSync(file, 'utf-8')
+}
+
+export function buildContentBlob (files) {
+  return files.map((file) => readTextFile(file)).join('\n')
+}
+
+export function logSavedBytes (prefix, distPath, file, saved) {
+  console.log(
+    `\x1b[32m[${prefix}] ${path.relative(distPath, file)}: saved ${saved} bytes\x1b[0m`
+  )
+}
+
+export function getByteLength (value) {
+  return Buffer.byteLength(value, 'utf-8')
+}
+
+export function applyIfSmaller (original, next) {
+  return getByteLength(next) < getByteLength(original) ? next : original
+}
+
+export function writeFileIfSmaller (file, original, next) {
+  const chosen = applyIfSmaller(original, next)
+  if (chosen !== original) {
+    fs.writeFileSync(file, chosen)
+    return getByteLength(original) - getByteLength(chosen)
+  }
+  return 0
+}
+
+const ALPHABET_62 = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+
+export function shortName (index, alphabet = ALPHABET_62) {
+  const base = alphabet.length
+  let out = ''
+  let i = index
+  do {
+    out = alphabet[i % base] + out
+    i = Math.floor(i / base) - 1
+  } while (i >= 0)
+  return out
+}
+
+const savingsState = {
+  total: 0,
+  byPlugin: new Map(),
+}
+
+export function resetSavings () {
+  savingsState.total = 0
+  savingsState.byPlugin.clear()
+}
+
+export function recordSavings (plugin, bytes) {
+  if (!bytes || bytes <= 0) return
+  const current = savingsState.byPlugin.get(plugin) || 0
+  savingsState.byPlugin.set(plugin, current + bytes)
+  savingsState.total += bytes
+}
+
+export function getSavingsReport () {
+  const byPlugin = [...savingsState.byPlugin.entries()]
+    .map(([name, bytes]) => ({ name, bytes }))
+    .sort((a, b) => b.bytes - a.bytes || a.name.localeCompare(b.name))
+  return { total: savingsState.total, byPlugin }
+}
+
 export function scanStringLiteral (code, start) {
   const quote = code[start]
   let i = start + 1

@@ -2,13 +2,19 @@
  * Astro integration to optimize GLSL shader strings embedded in JS bundles.
  * Applies only size-reducing transforms.
  */
-import fs from 'node:fs'
-import path from 'node:path'
 import {
-  findFiles,
+  collectFilesByExts,
+  readTextFile,
   scanStringLiteral,
   scanTemplateLiteral,
+  logSavedBytes,
+  recordSavings,
+  writeFileIfSmaller,
+  applyIfSmaller,
+  shortName,
 } from './utils.js'
+
+const SHADER_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 /** @returns {import('astro').AstroIntegration} */
 export function optimizeShader () {
@@ -17,23 +23,23 @@ export function optimizeShader () {
     hooks: {
       'astro:build:done': async ({ dir }) => {
         const distPath = dir.pathname
-        const jsFiles = findFiles(distPath, '.js')
+        const jsFiles = collectFilesByExts(distPath, ['.js'])
         let totalSaved = 0
 
-        console.log('[optimize-shader] Shader Optimization Phase...')
+        console.log('[optimize-shader] Minifying shader code...')
 
         for (const file of jsFiles) {
-          const original = fs.readFileSync(file, 'utf-8')
+          const original = readTextFile(file)
           const optimized = optimizeShadersInJs(original)
-          if (optimized.length < original.length) {
-            fs.writeFileSync(file, optimized)
-            const saved = original.length - optimized.length
+          const saved = writeFileIfSmaller(file, original, optimized)
+          if (saved > 0) {
             totalSaved += saved
-            console.log(`\x1b[32m[optimize-shader] ${path.relative(distPath, file)}: saved ${saved} bytes\x1b[0m`)
+            logSavedBytes('optimize-shader', distPath, file, saved)
           }
         }
 
         console.log(`\x1b[32m[optimize-shader] Total saved: ${totalSaved} bytes\x1b[0m`)
+        recordSavings('optimize-shader', totalSaved)
       }
     }
   }
@@ -70,7 +76,21 @@ function optimizeShadersInJs (code) {
 
     if (ch === '"' || ch === "'") {
       const end = scanStringLiteral(code, i)
-      out += code.slice(i, end)
+      const original = code.slice(i, end)
+      const raw = code.slice(i + 1, end - 1)
+      const decoded = decodeStringLiteral(raw)
+      const optimized = optimizeShaderSource(decoded)
+      if (optimized) {
+        const chosen = applyIfSmaller(decoded, optimized)
+        if (chosen !== decoded) {
+          const encoded = encodeStringLiteral(chosen, ch)
+          out += applyIfSmaller(original, encoded)
+        } else {
+          out += original
+        }
+      } else {
+        out += original
+      }
       i = end
       continue
     }
@@ -87,8 +107,13 @@ function optimizeShadersInJs (code) {
       } else {
         const raw = code.slice(i + 1, tpl.end - 1)
         const optimized = optimizeShaderSource(raw)
-        if (optimized && optimized.length < raw.length) {
-          out += '`' + optimized + '`'
+        if (optimized) {
+          const chosen = applyIfSmaller(raw, optimized)
+          if (chosen !== raw) {
+            out += '`' + chosen + '`'
+          } else {
+            out += original
+          }
         } else {
           out += original
         }
@@ -114,6 +139,134 @@ function optimizeShaderSource (source) {
   res = applyIfSmaller(res, minifyShaderNumbers(res))
   res = applyIfSmaller(res, minifyShaderSpacing(res))
   return res
+}
+
+function decodeStringLiteral (raw) {
+  let out = ''
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i]
+    if (ch !== '\\') {
+      out += ch
+      continue
+    }
+    if (i + 1 >= raw.length) {
+      out += '\\'
+      break
+    }
+    const next = raw[++i]
+    if (next === '\n') continue
+    if (next === '\r') {
+      if (raw[i + 1] === '\n') i++
+      continue
+    }
+    switch (next) {
+      case 'n':
+        out += '\n'
+        break
+      case 'r':
+        out += '\r'
+        break
+      case 't':
+        out += '\t'
+        break
+      case 'b':
+        out += '\b'
+        break
+      case 'f':
+        out += '\f'
+        break
+      case 'v':
+        out += '\v'
+        break
+      case '0':
+        out += '\0'
+        break
+      case 'x': {
+        const hex = raw.slice(i + 1, i + 3)
+        if (/^[0-9a-fA-F]{2}$/.test(hex)) {
+          out += String.fromCharCode(parseInt(hex, 16))
+          i += 2
+        } else {
+          out += 'x'
+        }
+        break
+      }
+      case 'u': {
+        if (raw[i + 1] === '{') {
+          const end = raw.indexOf('}', i + 2)
+          if (end !== -1) {
+            const hex = raw.slice(i + 2, end)
+            if (/^[0-9a-fA-F]+$/.test(hex)) {
+              out += String.fromCodePoint(parseInt(hex, 16))
+              i = end
+              break
+            }
+          }
+          out += 'u'
+          break
+        }
+        const hex = raw.slice(i + 1, i + 5)
+        if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+          out += String.fromCharCode(parseInt(hex, 16))
+          i += 4
+        } else {
+          out += 'u'
+        }
+        break
+      }
+      default:
+        out += next
+        break
+    }
+  }
+  return out
+}
+
+function encodeStringLiteral (value, quote) {
+  let out = quote
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i]
+    const code = value.charCodeAt(i)
+    if (ch === quote || ch === '\\') {
+      out += '\\' + ch
+      continue
+    }
+    if (ch === '\n') {
+      out += '\\n'
+      continue
+    }
+    if (ch === '\r') {
+      out += '\\r'
+      continue
+    }
+    if (ch === '\t') {
+      out += '\\t'
+      continue
+    }
+    if (ch === '\b') {
+      out += '\\b'
+      continue
+    }
+    if (ch === '\f') {
+      out += '\\f'
+      continue
+    }
+    if (ch === '\v') {
+      out += '\\v'
+      continue
+    }
+    if (ch === '\0') {
+      out += '\\0'
+      continue
+    }
+    if (code < 0x20) {
+      out += `\\x${code.toString(16).padStart(2, '0')}`
+      continue
+    }
+    out += ch
+  }
+  out += quote
+  return out
 }
 
 function looksLikeShader (source) {
@@ -174,7 +327,7 @@ function minifyShaderNumbers (source) {
     }
 
     const next = sign + mantissa + (exp || '')
-    return next.length < match.length ? next : match
+    return applyIfSmaller(match, next)
   })
 }
 
@@ -238,10 +391,6 @@ function needsShaderSpace (prev, next) {
   if (prev.type === 'number' && next.type === 'id') return true
   if (prev.type === 'number' && next.type === 'number') return true
   return false
-}
-
-function applyIfSmaller (original, next) {
-  return next.length < original.length ? next : original
 }
 
 function mangleShaderIdentifiers (source) {
@@ -395,12 +544,12 @@ function mangleShaderIdentifiers (source) {
   for (const name of sortedCandidates) {
     let next = null
     while (true) {
-      const candidate = shortAlphabetName(counter++)
+      const candidate = shortName(counter++, SHADER_ALPHABET)
       if (reserved.has(candidate) || used.has(candidate)) continue
       next = candidate
       break
     }
-    if (!next || next.length >= name.length) continue
+    if (!next || applyIfSmaller(name, next) === name) continue
     renameMap.set(name, next)
     used.add(next)
   }
@@ -416,7 +565,7 @@ function mangleShaderIdentifiers (source) {
     }
   }
 
-  return out.length < source.length ? out : source
+  return applyIfSmaller(source, out)
 }
 
 function considerCandidate (name, isStorage, candidates, reserved) {
@@ -498,17 +647,6 @@ function tokenizeShader (source) {
     i++
   }
   return tokens
-}
-
-function shortAlphabetName (index) {
-  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
-  let name = ''
-  let n = index
-  do {
-    name = chars[n % 52] + name
-    n = Math.floor(n / 52) - 1
-  } while (n >= 0)
-  return name
 }
 
 export default optimizeShader

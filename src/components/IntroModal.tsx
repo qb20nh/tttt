@@ -1,4 +1,4 @@
-import { X as XIcon } from 'lucide-react'
+import { X as XIcon } from 'lucide-preact'
 
 interface IntroModalProps {
   show: boolean

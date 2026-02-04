@@ -1,13 +1,27 @@
-export const vertexShader = `
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
+export const vertexShader = `#version 300 es
+precision highp float;
+precision highp int;
+
+in vec3 position;
+in vec2 uv;
+
+uniform mat4 projectionMatrix;
+uniform mat4 modelViewMatrix;
+
+out vec2 vUv;
+
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
 `
 
-export const fragmentShader = `
-  varying vec2 vUv;
+export const fragmentShader = `#version 300 es
+  precision highp float;
+  precision highp int;
+
+  in vec2 vUv;
+  out vec4 outColor;
   
   uniform sampler2D uStateTexture;
   uniform ivec2 uHover;
@@ -15,8 +29,8 @@ export const fragmentShader = `
   uniform float uTime;
   uniform float uPlayer; 
   uniform int uDepth;
-  uniform int uConstraintLevel;
-  uniform int uGameOver; // 0 or 1
+  uniform float uConstraintLevel;
+  uniform float uGameOver; // 0..1
 
   // Colors
   const vec3 C_BG_BLUE = vec3(0.05, 0.07, 0.12);
@@ -144,8 +158,9 @@ export const fragmentShader = `
         globalIdx += cellXY * multiplier;
     }
 
+    float gameOver = clamp(uGameOver, 0.0, 1.0);
     vec3 baseColor = mix(C_BG_BLUE, C_BG_RED, uPlayer);
-    if (uGameOver > 0) baseColor = C_BG_NEUTRAL;
+    baseColor = mix(baseColor, C_BG_NEUTRAL, gameOver);
     
     vec3 color = baseColor;
     
@@ -168,7 +183,7 @@ export const fragmentShader = `
         
         vec2 texUV = (idx + 0.5) / 81.0;
         
-        vec4 state = texture2D(uStateTexture, texUV);
+        vec4 state = texture(uStateTexture, texUV);
         
         // 1. Tint
         if (state.a > 0.05) color = mix(color, getPlayerColor(state.a), 0.05);
@@ -288,8 +303,18 @@ export const fragmentShader = `
                 int pattern = int(floor(pFloat + 0.5));
                 vec3 winColor = isX ? C_X : C_O;
                 
-                vec2 lUV = uvLevels[levelIdx];
-                float lPx = pxLevels[levelIdx];
+                vec2 lUV = uvLevels[0];
+                float lPx = pxLevels[0];
+                if (levelIdx == 1) {
+                    lUV = uvLevels[1];
+                    lPx = pxLevels[1];
+                } else if (levelIdx == 2) {
+                    lUV = uvLevels[2];
+                    lPx = pxLevels[2];
+                } else if (levelIdx == 3) {
+                    lUV = uvLevels[3];
+                    lPx = pxLevels[3];
+                }
                 
                 // Air Depth
                 float airDepth = 0.0;
@@ -369,7 +394,7 @@ export const fragmentShader = `
        // Formula: 5.0 - (Len - 1) = 6.0 - Len.
        // uConstraintLevel is Len.
         
-       float mult = 6.0 - float(uConstraintLevel);
+       float mult = 6.0 - uConstraintLevel;
        mult = max(mult, 1.0); 
         
        float goldThick = (BASE_GAP * mult) / gridSize.x; 
@@ -378,6 +403,6 @@ export const fragmentShader = `
        color = mix(color, C_GOLD, goldBorder * pulse);
     }
 
-    gl_FragColor = vec4(color, 1.0);
+    outColor = vec4(color, 1.0);
   }
 `

@@ -7,7 +7,7 @@ import {
   X,
   Circle,
   Loader2,
-} from 'lucide-react'
+} from 'lucide-preact'
 import { useState, useRef, useEffect } from 'react'
 import type Stats from 'stats.js'
 import type { Player, Winner } from '../game/types'

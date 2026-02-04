@@ -27,6 +27,7 @@ export default defineConfig([
     },
     rules: {
       'react-compiler/react-compiler': 'error',
+      'react-x/no-use-context': 'off',
     },
     languageOptions: {
       ecmaVersion: 2020,
