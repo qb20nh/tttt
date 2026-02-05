@@ -4,6 +4,10 @@ import type { RoutesConfig } from '../router'
 import { DEFAULT_DEPTH } from '../game/constants'
 import type { GameMode } from '../game/types'
 
+interface AppProps {
+  initialPath?: string
+}
+
 // Lazy load components for code splitting
 const HomeScreen = lazy(() =>
   import('./HomeScreen').then((m) => ({ default: m.HomeScreen }))
@@ -39,9 +43,9 @@ function parsePlayParams (params: Record<string, string>) {
   }
 }
 
-export const App = () => {
+export const App = ({ initialPath }: AppProps) => {
   return (
-    <Router routes={routes}>
+    <Router routes={routes} initialPath={initialPath}>
       {({ route, navigate }) => {
         const Component = route.definition.component
 

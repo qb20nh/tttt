@@ -1,13 +1,22 @@
-import { useCallback, useEffect, useImperativeHandle, useRef } from 'react'
-import type { Ref } from 'react'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+} from 'react'
 import type Stats from 'stats.js'
 import type { BoardNode, Player, Winner } from '../game/types'
-import { BOARD_SIZE } from '../game/constants'
+import {
+  BOARD_SIZE,
+  DEFAULT_VIEW_SCALE,
+  MAX_VIEW_SCALE,
+  MIN_VIEW_SCALE,
+} from '../game/constants'
 import { getPathFromCoordinates, isValidPath } from '../game/logic'
 import { getConstraintRect, mapUVToCell } from './layout'
 import { fillBoardTexture } from './boardTexture'
 import { getRenderer, requestRendererCompile } from './renderer'
-
 export interface Scene3DHandle {
   zoomIn: () => void
   zoomOut: () => void
@@ -23,14 +32,9 @@ interface Scene3DProps {
   statsInstance: Stats | null
   depth: number
   initialReset: boolean
-  ref?: Ref<Scene3DHandle>
 }
 
-const MIN_SCALE = 0.7
-const MAX_SCALE = 6
-const DEFAULT_SCALE = 0.9
-
-export const Scene3D = ({
+export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({
   board,
   activeConstraint,
   currentPlayer,
@@ -39,8 +43,7 @@ export const Scene3D = ({
   statsInstance,
   depth,
   initialReset,
-  ref,
-}: Scene3DProps) => {
+}, ref) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<ReturnType<typeof getRenderer> | null>(null)
   const rendererErrorRef = useRef<unknown | null>(null)
@@ -49,7 +52,7 @@ export const Scene3D = ({
   const textureDataRef = useRef<Float32Array | Uint8Array | null>(null)
   const needsTextureUpdateRef = useRef(true)
 
-  const viewRef = useRef({ scale: DEFAULT_SCALE, offsetX: 0, offsetY: 0 })
+  const viewRef = useRef({ scale: DEFAULT_VIEW_SCALE, offsetX: 0, offsetY: 0 })
   const hoverRef = useRef({ x: -1, y: -1 })
   const constraintRef = useRef({ x: 0, y: 0, w: 0, h: 0, level: 0 })
   const projectionRef = useRef({ x: 1, y: 1 })
@@ -136,7 +139,7 @@ export const Scene3D = ({
   }, [])
 
   const resetView = useCallback(() => {
-    viewRef.current = { scale: DEFAULT_SCALE, offsetX: 0, offsetY: 0 }
+    viewRef.current = { scale: DEFAULT_VIEW_SCALE, offsetX: 0, offsetY: 0 }
     applyView()
   }, [applyView])
 
@@ -147,8 +150,8 @@ export const Scene3D = ({
     const view = viewRef.current
     const currentScale = view.scale
     const nextScale = Math.max(
-      MIN_SCALE,
-      Math.min(MAX_SCALE, currentScale * factor)
+      MIN_VIEW_SCALE,
+      Math.min(MAX_VIEW_SCALE, currentScale * factor)
     )
     if (nextScale === currentScale) return
 
@@ -607,6 +610,6 @@ export const Scene3D = ({
       </div>
     </>
   )
-}
+})
 
 Scene3D.displayName = 'Scene3D'

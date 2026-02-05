@@ -1,22 +1,5 @@
 ---
-import Layout from "../layouts/Layout.astro";
-import { App } from "../components/App";
+import AppPage from "../components/AppPage.astro";
 ---
 
-<Layout title="Play | Fractal TTT">
-  <div
-    class="w-full h-dvh overflow-hidden relative bg-black text-white selection:bg-cyan-500/30"
-  >
-    <!-- Static content for instant View Transition capture -->
-    <div
-      class="absolute inset-0 flex items-center justify-center pointer-events-none z-0"
-    >
-      <div class="text-cyan-500/50 animate-pulse font-bold tracking-widest">
-        Loading...
-      </div>
-    </div>
-
-    <!-- App component persists across page navigations -->
-    <App client:idle transition:persist="app" />
-  </div>
-</Layout>
+<AppPage title="Play | Fractal TTT" showLoading={true} />

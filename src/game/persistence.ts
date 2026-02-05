@@ -151,6 +151,9 @@ function reconstructBoard (
 
 export function saveGameState (state: SavedState) {
   try {
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+      return
+    }
     const flat = flattenBoard(state.board)
     const compacted = compactBoard(flat)
     const compressed = compressRLE(compacted)
@@ -207,6 +210,9 @@ export function saveGameState (state: SavedState) {
 
 export function loadGameState (): SavedState | null {
   try {
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+      return null
+    }
     const data = localStorage.getItem(KEY)
     if (!data) return null
 
@@ -287,6 +293,9 @@ export function loadGameState (): SavedState | null {
 }
 
 export function clearSavedState () {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+    return
+  }
   localStorage.removeItem(KEY)
 }
 
@@ -304,6 +313,9 @@ export function getSavedGameMeta (): {
   depth: number
 } | null {
   try {
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+      return null
+    }
     const data = localStorage.getItem(KEY)
     if (!data) {
       cachedMeta = null

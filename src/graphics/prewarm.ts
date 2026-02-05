@@ -1,5 +1,5 @@
 import { getRenderer, requestRendererCompile } from './renderer'
-import { BOARD_SIZE } from '../game/constants'
+import { BOARD_SIZE, DEFAULT_VIEW_SCALE } from '../game/constants'
 
 let hasPrewarmed = false
 let isPrewarming = false
@@ -113,7 +113,7 @@ const prewarmShaders = () => {
     .whenReady()
     .then(() => {
       renderer.setSize(2, 2, 1)
-      renderer.setView(1, 0, 0)
+      renderer.setView(DEFAULT_VIEW_SCALE, 0, 0)
       renderer.setProjection(1, 1)
 
       const data = new (renderer.useFloatTexture

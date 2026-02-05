@@ -22,3 +22,8 @@ export const getSearchDepth = (boardDepth: number): number => {
 export const BASE_GAP = 0.000625
 export const OUTER_GAP = 5.0 * BASE_GAP
 export const BOARD_SIZE = 81
+
+// --- Rendering Defaults ---
+export const MIN_VIEW_SCALE = 0.7
+export const MAX_VIEW_SCALE = 8
+export const DEFAULT_VIEW_SCALE = 0.9

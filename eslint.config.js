@@ -28,6 +28,7 @@ export default defineConfig([
     rules: {
       'react-compiler/react-compiler': 'error',
       'react-x/no-use-context': 'off',
+      'react-x/no-forward-ref': 'off',
     },
     languageOptions: {
       ecmaVersion: 2020,

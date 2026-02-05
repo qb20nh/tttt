@@ -34,6 +34,32 @@ export const GameClient = ({
     return () => cancelAnimationFrame(timer)
   }, [])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    type IdleDeadline = { didTimeout: boolean; timeRemaining: () => number }
+    type RequestIdleCallback = (
+      cb: (deadline: IdleDeadline) => void,
+      opts?: { timeout: number }
+    ) => number
+    type CancelIdleCallback = (handle: number) => void
+
+    const win = window as Window & {
+      requestIdleCallback?: RequestIdleCallback
+      cancelIdleCallback?: CancelIdleCallback
+    }
+
+    const schedule = () => preloadHomeScreen()
+
+    if (win.requestIdleCallback) {
+      const id = win.requestIdleCallback(() => schedule(), { timeout: 2000 })
+      return () => win.cancelIdleCallback?.(id)
+    }
+
+    const timeoutId = window.setTimeout(schedule, 800)
+    return () => window.clearTimeout(timeoutId)
+  }, [])
+
   // Initialize Engine
   const {
     board,

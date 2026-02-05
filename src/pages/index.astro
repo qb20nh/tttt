@@ -1,12 +1,5 @@
 ---
-import Layout from "../layouts/Layout.astro";
-import { App } from "../components/App";
+import AppPage from "../components/AppPage.astro";
 ---
 
-<Layout title="Fractal TTT">
-  <div
-    class="w-full h-dvh overflow-hidden relative bg-black text-white selection:bg-cyan-500/30"
-  >
-    <App client:idle transition:persist="app" />
-  </div>
-</Layout>
+<AppPage title="Fractal TTT" />

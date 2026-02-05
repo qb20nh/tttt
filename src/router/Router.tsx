@@ -14,6 +14,8 @@ interface RouterProps<T extends string> {
   routes: RoutesConfig<T>
   /** Base URL path (defaults to import.meta.env.BASE_URL) */
   basePath?: string
+  /** SSR/static initial path (used when window is undefined) */
+  initialPath?: string
   /** Fallback while lazy components load */
   fallback?: ReactNode
   /** Render function receiving route, params, and navigate */
@@ -69,6 +71,19 @@ function matchRoute<T extends string> (
   return null
 }
 
+function normalizeInitialPath (path: string, basePath: string): string {
+  const base = basePath.replace(/\/$/, '')
+  if (!base) return path
+  if (path.startsWith(base)) return path
+  if (path.startsWith('/')) return `${base}${path}`
+  return `${base}/${path}`
+}
+
+function locationFromPath (path: string): Location {
+  const url = new URL(path, 'http://localhost')
+  return { pathname: url.pathname, search: url.search } as Location
+}
+
 /**
  * Build URL for a route
  */
@@ -103,12 +118,22 @@ function buildRouteUrl<T extends string> (
 export function Router<T extends string> ({
   routes,
   basePath = import.meta.env.BASE_URL,
+  initialPath,
   fallback,
   children,
 }: RouterProps<T>) {
   // Parse initial route
   const [route, setRoute] = useState<MatchedRoute | null>(() => {
     if (typeof window === 'undefined') {
+      if (initialPath) {
+        const normalizedPath = normalizeInitialPath(initialPath, basePath)
+        const matched = matchRoute(
+          locationFromPath(normalizedPath),
+          routes,
+          basePath
+        )
+        if (matched) return matched
+      }
       // SSR: return first route as fallback
       const firstRouteName = Object.keys(routes)[0] as T
       return {

@@ -1,0 +1,32 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { App } from "./App";
+
+interface Props {
+  title: string;
+  showLoading?: boolean;
+}
+
+const { title, showLoading = false } = Astro.props as Props;
+const initialPath = `${Astro.url.pathname}${Astro.url.search}`;
+---
+
+<Layout title={title}>
+  <div
+    class="w-full h-dvh overflow-hidden relative bg-black text-white selection:bg-cyan-500/30"
+  >
+    {
+      showLoading && (
+        <div
+          class="absolute inset-0 flex items-center justify-center pointer-events-none z-0"
+        >
+          <div class="text-cyan-500/50 animate-pulse font-bold tracking-widest">
+            Loading...
+          </div>
+        </div>
+      )
+    }
+
+    <App client:idle transition:persist="app" initialPath={initialPath} />
+  </div>
+</Layout>
