@@ -8,6 +8,8 @@ import {
   recordSavings,
   readTextFile,
   shortName,
+  bumpCount,
+  sortByUsage,
 } from './utils.js'
 
 const CID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
@@ -26,6 +28,7 @@ export function mangleAstroCids () {
         ])
 
         const ids = new Set()
+        const cidCounts = new Map()
         const cidPattern = /astro-cid-([A-Za-z0-9]+)/g
         for (const file of scanFiles) {
           const content = readTextFile(file)
@@ -33,6 +36,7 @@ export function mangleAstroCids () {
           let match
           while ((match = cidPattern.exec(content))) {
             ids.add(match[1])
+            bumpCount(cidCounts, match[1])
           }
         }
 
@@ -46,7 +50,9 @@ export function mangleAstroCids () {
         const mapping = new Map()
         let counter = 0
 
-        for (const id of [...ids].sort()) {
+        const sortedIds = sortByUsage(ids, cidCounts)
+
+        for (const id of sortedIds) {
           const idBytes = getByteLength(id)
           let next = null
           while (true) {

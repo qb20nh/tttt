@@ -46,6 +46,22 @@ export function getByteLength (value) {
   return Buffer.byteLength(value, 'utf-8')
 }
 
+export function bumpCount (counts, key, amount = 1) {
+  counts.set(key, (counts.get(key) || 0) + amount)
+}
+
+export function sortByUsage (items, counts, getLength = (value) => getByteLength(value), getKey = (value) => value) {
+  return [...items].sort((a, b) => {
+    const countDiff = (counts.get(b) || 0) - (counts.get(a) || 0)
+    if (countDiff) return countDiff
+    const lenDiff = getLength(b) - getLength(a)
+    if (lenDiff) return lenDiff
+    const aKey = getKey(a)
+    const bKey = getKey(b)
+    return String(aKey).localeCompare(String(bKey))
+  })
+}
+
 export function applyIfSmaller (original, next) {
   return getByteLength(next) < getByteLength(original) ? next : original
 }

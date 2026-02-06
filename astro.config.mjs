@@ -29,12 +29,24 @@ export default defineConfig({
       Beasties: {
         path: './dist',
         publicPath: '/tttt/',
-        preload: 'swap',
-        inlineThreshold: 30000,
-        noscriptFallback: true,
+        preload: 'swap-high',
       },
     }),
-    compress(),
+    compress({
+      JavaScript: {
+        terser: {
+          compress: {
+            passes: 2,
+            drop_console: ['log', 'info'],
+            ecma: 2015,
+            module: true,
+          },
+          mangle: {
+            module: true,
+          }
+        }
+      }
+    }),
     withReportSavings([
       mangleCSS(),
       optimizeShader(),

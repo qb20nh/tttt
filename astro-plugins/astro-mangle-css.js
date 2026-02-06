@@ -12,9 +12,20 @@ import {
   readTextFile,
   recordSavings,
   shortName,
+  bumpCount,
+  sortByUsage,
 } from './utils.js'
 
 const ALPHABET_ALPHA = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+
+function makeCountingSet (set, counts) {
+  return {
+    add: (value) => {
+      set.add(value)
+      bumpCount(counts, value)
+    },
+  }
+}
 
 /** @returns {import('astro').AstroIntegration} */
 export function mangleCSS () {
@@ -38,6 +49,9 @@ export function mangleCSS () {
         const cssClassMap = new Map()
         const idMap = new Map()
         const cssIdMap = new Map()
+        const varCounts = new Map()
+        const classCounts = new Map()
+        const idCounts = new Map()
 
         let varCounter = 0
         let classCounter = 0
@@ -59,13 +73,16 @@ export function mangleCSS () {
           const content = fileContents.get(file)
           const varMatches = content.match(/--[a-zA-Z0-9_-]+/g)
           if (varMatches) {
-            for (const v of varMatches) varNames.add(v)
+            for (const v of varMatches) {
+              varNames.add(v)
+              bumpCount(varCounts, v)
+            }
           }
         }
 
         const reservedVars = new Set(varNames)
         const usedShortVars = new Set()
-        const sortedVarNames = [...varNames].sort((a, b) => b.length - a.length || a.localeCompare(b))
+        const sortedVarNames = sortByUsage(varNames, varCounts)
         for (const v of sortedVarNames) {
           if (getByteLength(v) <= 5) continue
           let short = getShortVar()
@@ -104,58 +121,67 @@ export function mangleCSS () {
           }
         }
 
+        // 3b. Count class/id usage in stylesheets
+        for (const file of cssFiles) {
+          const content = fileContents.get(file)
+          countCssClassOccurrences(content, classNames, classCounts)
+          countCssIdOccurrences(content, idNames, idCounts)
+        }
+
         // 4. Collect class/id usage from HTML and JS to avoid mangling dynamic-only tokens
         const usedClassNames = new Set()
         const usedIdNames = new Set()
         const htmlIdNames = new Set()
+        const classUseSink = makeCountingSet(usedClassNames, classCounts)
+        const idUseSink = makeCountingSet(usedIdNames, idCounts)
         for (const file of htmlFiles) {
           const content = fileContents.get(file)
           const classMatches = content.matchAll(CLASS_ATTR_RE)
           for (const match of classMatches) {
             const value = match[1] ?? match[2] ?? match[3] ?? ''
-            collectClassTokensFromString(value, classNames, usedClassNames)
+            collectClassTokensFromString(value, classNames, classUseSink)
           }
 
           const idMatches = content.matchAll(ID_ATTR_RE)
           for (const match of idMatches) {
             const value = match[2] ?? match[3] ?? match[4] ?? ''
-            collectIdTokensFromString(value, idNames, usedIdNames, htmlIdNames)
+            collectIdTokensFromString(value, idNames, idUseSink, htmlIdNames)
           }
 
           const refAttrMatches = content.matchAll(ID_REF_ATTR_RE)
           for (const match of refAttrMatches) {
             const value = match[3] ?? match[4] ?? match[5] ?? ''
-            collectIdTokensFromString(value, idNames, usedIdNames)
+            collectIdTokensFromString(value, idNames, idUseSink)
           }
 
           const hrefMatches = content.matchAll(/\b(?:xlink:href|href)=(["'])#([^"']+)\1/gi)
           for (const match of hrefMatches) {
             const token = match[2]
-            if (idNames.has(token)) usedIdNames.add(token)
+            if (idNames.has(token)) idUseSink.add(token)
           }
 
           const urlMatches = content.matchAll(/url\(\s*(['"])?#([^'")\s]+)\1\s*\)/gi)
           for (const match of urlMatches) {
             const token = match[2]
-            if (idNames.has(token)) usedIdNames.add(token)
+            if (idNames.has(token)) idUseSink.add(token)
           }
 
           content.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, (m, body) => {
-            collectUsedClassesFromJs(body, classNames, usedClassNames)
-            collectUsedIdsFromJs(body, idNames, usedIdNames)
+            collectUsedClassesFromJs(body, classNames, classUseSink)
+            collectUsedIdsFromJs(body, idNames, idUseSink)
             return m
           })
         }
 
         for (const file of jsFiles) {
           const content = fileContents.get(file)
-          collectUsedClassesFromJs(content, classNames, usedClassNames)
-          collectUsedIdsFromJs(content, idNames, usedIdNames)
+          collectUsedClassesFromJs(content, classNames, classUseSink)
+          collectUsedIdsFromJs(content, idNames, idUseSink)
         }
 
         const reservedClasses = new Set(usedClassNames)
         const usedShortClasses = new Set()
-        const sortedClassNames = [...usedClassNames].sort((a, b) => b.length - a.length || a.localeCompare(b))
+        const sortedClassNames = sortByUsage(usedClassNames, classCounts)
         for (const name of sortedClassNames) {
           let candidate = null
           let candidateCounter = classCounter
@@ -182,7 +208,7 @@ export function mangleCSS () {
 
         const reservedIds = new Set([...idNames, ...htmlIdNames])
         const usedShortIds = new Set()
-        const sortedIdNames = [...usedIdNames].sort((a, b) => b.length - a.length || a.localeCompare(b))
+        const sortedIdNames = sortByUsage(usedIdNames, idCounts)
         for (const name of sortedIdNames) {
           let candidate = null
           let candidateCounter = idCounter
@@ -937,6 +963,50 @@ function collectCssIds (css) {
     i = end
   }
   return result
+}
+
+function countCssClassOccurrences (css, knownClasses, counts) {
+  if (!knownClasses || knownClasses.size === 0) return
+  let i = 0
+  while (i < css.length) {
+    if (css[i] !== '.') {
+      i++
+      continue
+    }
+    const parsed = readCssIdent(css, i + 1)
+    if (!parsed) {
+      i++
+      continue
+    }
+    const { ident, end } = parsed
+    const unescaped = unescapeCssIdent(ident)
+    if (unescaped && !/^\d/.test(unescaped) && knownClasses.has(unescaped)) {
+      bumpCount(counts, unescaped)
+    }
+    i = end
+  }
+}
+
+function countCssIdOccurrences (css, knownIds, counts) {
+  if (!knownIds || knownIds.size === 0) return
+  let i = 0
+  while (i < css.length) {
+    if (css[i] !== '#') {
+      i++
+      continue
+    }
+    const parsed = readCssIdent(css, i + 1)
+    if (!parsed) {
+      i++
+      continue
+    }
+    const { ident, end } = parsed
+    const unescaped = unescapeCssIdent(ident)
+    if (unescaped && !/^\d/.test(unescaped) && !isHexColorIdent(unescaped) && knownIds.has(unescaped)) {
+      bumpCount(counts, unescaped)
+    }
+    i = end
+  }
 }
 
 function readCssIdent (css, start) {

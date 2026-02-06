@@ -11,6 +11,8 @@ import {
   recordSavings,
   readTextFile,
   shortName,
+  bumpCount,
+  sortByUsage,
 } from './utils.js'
 
 function escapeRegExp (value) {
@@ -37,9 +39,36 @@ export function mangleFilenames () {
           .filter((entry) => entry.isFile())
           .map((entry) => entry.name)
 
-        const targets = entries
+        let targets = entries
           .filter((name) => name.endsWith('.js') || name.endsWith('.css'))
-          .sort((a, b) => a.localeCompare(b))
+
+        const scanFilesForCounts = collectFilesByExts(distPath, [
+          '.js',
+          '.html',
+          '.css',
+          '.json',
+        ])
+
+        const nameCounts = new Map()
+        if (targets.length > 0 && scanFilesForCounts.length > 0) {
+          const countPattern = new RegExp(
+            [...targets]
+              .sort((a, b) => getByteLength(b) - getByteLength(a) || a.localeCompare(b))
+              .map((name) => escapeRegExp(name))
+              .join('|'),
+            'g'
+          )
+          for (const file of scanFilesForCounts) {
+            const content = readTextFile(file)
+            countPattern.lastIndex = 0
+            let match
+            while ((match = countPattern.exec(content))) {
+              bumpCount(nameCounts, match[0])
+            }
+          }
+        }
+
+        targets = sortByUsage(targets, nameCounts)
 
         const usedNames = new Set(entries)
         const renames = new Map()
