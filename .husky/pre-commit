@@ -1,1 +1,3 @@
+node scripts/sort-package-json.js
+git add package.json
 npx lint-staged

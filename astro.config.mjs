@@ -3,6 +3,7 @@ import preact from '@astrojs/preact'
 import tailwindcss from '@tailwindcss/vite'
 import playformInline from '@playform/inline'
 import compress from '@playform/compress'
+import { fixPreloadAttributes } from './astro-plugins/astro-fix-preload-attributes.js'
 import { mangleCSS } from './astro-plugins/astro-mangle-css.js'
 import { optimizeShader } from './astro-plugins/astro-optimize-shader.js'
 import { optimizeLicense } from './astro-plugins/astro-optimize-license.js'
@@ -15,6 +16,10 @@ import { visualizer } from 'rollup-plugin-visualizer'
 // https://astro.build/config
 export default defineConfig({
   prefetch: true,
+  site: 'https://apps.qb20nh.dev/tttt/',
+  server: {
+    allowedHosts: ['dev.qb20nh.dev'],
+  },
   base: '/tttt/',
   output: 'static',
   integrations: [
@@ -30,22 +35,21 @@ export default defineConfig({
         path: './dist',
         publicPath: '/tttt/',
         preload: 'swap-high',
+        pruneSource: true,
       },
     }),
+    fixPreloadAttributes(),
     compress({
       JavaScript: {
         terser: {
+          ecma: 2022,
+          module: true,
           compress: {
             passes: 2,
             drop_console: ['log', 'info'],
-            ecma: 2015,
-            module: true,
           },
-          mangle: {
-            module: true,
-          }
         }
-      }
+      },
     }),
     withReportSavings([
       mangleCSS(),
@@ -75,18 +79,13 @@ export default defineConfig({
       }),
     ].filter(Boolean),
     build: {
+      target: 'es2022',
       rollupOptions: {
         output: {
           manualChunks: {
             'preact-vendor': ['preact', 'preact/compat'],
           },
         },
-      },
-    },
-    server: {
-      headers: {
-        'Cross-Origin-Embedder-Policy': 'require-corp',
-        'Cross-Origin-Opener-Policy': 'same-origin',
       },
     },
   },
