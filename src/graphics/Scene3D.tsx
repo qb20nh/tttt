@@ -4,6 +4,7 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  useState,
 } from 'react'
 import type Stats from 'stats.js'
 import type { BoardNode, Player, Winner } from '../game/types'
@@ -16,7 +17,12 @@ import {
 import { getPathFromCoordinates, isValidPath } from '../game/logic'
 import { getConstraintRect, mapUVToCell } from './layout'
 import { fillBoardTexture } from './boardTexture'
-import { getRenderer, requestRendererCompile } from './renderer'
+import {
+  disposeRenderer,
+  getRenderer,
+  getRendererInitStatus,
+  requestRendererCompile,
+} from './renderer'
 export interface Scene3DHandle {
   zoomIn: () => void
   zoomOut: () => void
@@ -48,9 +54,11 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({
   const rendererRef = useRef<ReturnType<typeof getRenderer> | null>(null)
   const rendererErrorRef = useRef<unknown | null>(null)
   const fallbackRef = useRef<HTMLDivElement>(null)
+  const fallbackReasonRef = useRef<HTMLParagraphElement>(null)
   const animationRef = useRef<number | null>(null)
   const textureDataRef = useRef<Float32Array | Uint8Array | null>(null)
   const needsTextureUpdateRef = useRef(true)
+  const [rendererAttempt, setRendererAttempt] = useState(0)
 
   const viewRef = useRef({ scale: DEFAULT_VIEW_SCALE, offsetX: 0, offsetY: 0 })
   const hoverRef = useRef({ x: -1, y: -1 })
@@ -173,6 +181,25 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({
     zoomAt(1 / 1.2, 0, 0)
   }, [zoomAt])
 
+  const getFallbackReason = useCallback(() => {
+    const status = getRendererInitStatus()
+    if (status.ok) return ''
+    return status.reason
+  }, [])
+
+  const retryRendererInit = useCallback(() => {
+    rendererRef.current = null
+    rendererErrorRef.current = null
+    disposeRenderer()
+    if (fallbackRef.current) {
+      fallbackRef.current.style.display = 'none'
+    }
+    if (fallbackReasonRef.current) {
+      fallbackReasonRef.current.textContent = ''
+    }
+    setRendererAttempt((prev) => prev + 1)
+  }, [])
+
   useImperativeHandle(ref, () => ({ zoomIn, zoomOut, resetView }), [
     zoomIn,
     zoomOut,
@@ -187,10 +214,11 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({
 
   useEffect(() => {
     if (!containerRef.current) return
-    requestRendererCompile()
+
     if (!rendererRef.current && rendererErrorRef.current === null) {
       try {
         rendererRef.current = getRenderer()
+        requestRendererCompile()
       } catch (error) {
         rendererErrorRef.current = error
       }
@@ -198,13 +226,17 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({
 
     const renderer = rendererRef.current
     if (!renderer) {
-      if (rendererErrorRef.current) {
-        console.error(rendererErrorRef.current)
+      if (fallbackReasonRef.current) {
+        fallbackReasonRef.current.textContent = getFallbackReason()
       }
       if (fallbackRef.current) {
         fallbackRef.current.style.display = 'flex'
       }
       return
+    }
+
+    if (fallbackReasonRef.current) {
+      fallbackReasonRef.current.textContent = ''
     }
     if (fallbackRef.current) {
       fallbackRef.current.style.display = 'none'
@@ -596,17 +628,36 @@ export const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(({
         container.removeChild(canvas)
       }
     }
-  }, [applyView, zoomAt])
+  }, [applyView, getFallbackReason, zoomAt, rendererAttempt])
 
   return (
     <>
       <div ref={containerRef} className='absolute inset-0 z-0' />
       <div
         ref={fallbackRef}
-        className='absolute inset-0 items-center justify-center text-slate-500'
-        style={{ display: 'none' }}
+        className='absolute inset-0 z-20 hidden items-center justify-center bg-black/80 px-4 text-center'
       >
-        WebGL2 not supported on this device.
+        <div className='max-w-xl rounded-xl border border-slate-700 bg-slate-900/95 p-6 text-slate-300 shadow-xl'>
+          <h3 className='text-lg font-bold text-white'>Graphics Compatibility Issue</h3>
+          <p className='mt-2 text-sm text-slate-300'>
+            WebGL2 could not be initialized on this browser/GPU configuration.
+          </p>
+          <p ref={fallbackReasonRef} className='mt-2 text-xs text-slate-400' />
+          <p className='mt-3 text-xs text-slate-400'>
+            On Linux Chrome, verify hardware acceleration is enabled and check
+            {' '}
+            <span className='font-mono text-slate-300'>chrome://gpu</span>
+            {' '}
+            for WebGL/WebGL2 status.
+          </p>
+          <button
+            type='button'
+            onClick={retryRendererInit}
+            className='mt-4 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 active:scale-95'
+          >
+            Retry Graphics
+          </button>
+        </div>
       </div>
     </>
   )

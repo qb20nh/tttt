@@ -5,6 +5,89 @@ type ParallelCompileExtension = {
   COMPLETION_STATUS_KHR: number
 }
 
+export type RendererProfile = 'strict' | 'balanced' | 'compat'
+
+export type RendererInitStatus =
+  | { ok: true; profile: RendererProfile }
+  | { ok: false; reason: string }
+
+type RendererContextProfile = {
+  profile: RendererProfile
+  attributes: {
+    antialias: boolean
+    preserveDrawingBuffer: boolean
+    powerPreference: WebGLPowerPreference
+  }
+}
+
+const CONTEXT_PROFILES: RendererContextProfile[] = [
+  {
+    profile: 'strict',
+    attributes: {
+      antialias: true,
+      preserveDrawingBuffer: true,
+      powerPreference: 'high-performance',
+    },
+  },
+  {
+    profile: 'balanced',
+    attributes: {
+      antialias: true,
+      preserveDrawingBuffer: false,
+      powerPreference: 'default',
+    },
+  },
+  {
+    profile: 'compat',
+    attributes: {
+      antialias: false,
+      preserveDrawingBuffer: false,
+      powerPreference: 'default',
+    },
+  },
+]
+
+class RendererInitError extends Error {
+  attemptedProfiles: RendererProfile[]
+  webgl2ApiAvailable: boolean
+
+  constructor (
+    attemptedProfiles: RendererProfile[],
+    webgl2ApiAvailable: boolean
+  ) {
+    const profileList = attemptedProfiles.join(', ')
+    const reason = webgl2ApiAvailable
+      ? `Failed to create WebGL2 context (profiles tried: ${profileList}).`
+      : 'WebGL2 API is unavailable in this browser.'
+    super(reason)
+    this.name = 'RendererInitError'
+    this.attemptedProfiles = attemptedProfiles
+    this.webgl2ApiAvailable = webgl2ApiAvailable
+  }
+}
+
+const resolveWebGL2Context = (
+  canvas: HTMLCanvasElement
+): { gl: WebGL2RenderingContext; profile: RendererProfile } => {
+  const attemptedProfiles: RendererProfile[] = []
+  for (const profile of CONTEXT_PROFILES) {
+    attemptedProfiles.push(profile.profile)
+    const gl = canvas.getContext('webgl2', profile.attributes)
+    if (gl) {
+      return { gl, profile: profile.profile }
+    }
+  }
+
+  const webgl2ApiAvailable = typeof window !== 'undefined' &&
+    typeof window.WebGL2RenderingContext !== 'undefined'
+  throw new RendererInitError(attemptedProfiles, webgl2ApiAvailable)
+}
+
+const getInitReason = (error: unknown) => {
+  if (error instanceof Error) return error.message
+  return String(error)
+}
+
 export interface RenderState {
   time: number
   hover: { x: number; y: number }
@@ -66,6 +149,7 @@ const createPendingProgram = (
 export class GameRenderer {
   canvas: HTMLCanvasElement
   gl: WebGL2RenderingContext
+  profile: RendererProfile
   program: WebGLProgram | null
   texture: WebGLTexture
   textureScale: number
@@ -99,17 +183,11 @@ export class GameRenderer {
   private buffer: WebGLBuffer
 
   constructor (canvas: HTMLCanvasElement) {
-    const gl = canvas.getContext('webgl2', {
-      antialias: true,
-      preserveDrawingBuffer: true,
-      powerPreference: 'high-performance',
-    })
-    if (!gl) {
-      throw new Error('WebGL2 is not supported in this browser')
-    }
+    const { gl, profile } = resolveWebGL2Context(canvas)
 
     this.canvas = canvas
     this.gl = gl
+    this.profile = profile
     this.program = null
     this.programState = 'idle'
     this.programError = null
@@ -540,6 +618,13 @@ export class GameRenderer {
 
 let rendererInstance: GameRenderer | null = null
 let compileRequested = false
+let rendererInitError: Error | null = null
+let rendererInitStatus: RendererInitStatus = {
+  ok: false,
+  reason: 'Renderer has not been initialized yet.',
+}
+let initFailureLogged = false
+let compatProfileLogged = false
 
 const scheduleAfterLoadIdle = (callback: () => void) => {
   if (typeof window === 'undefined') return () => {}
@@ -577,10 +662,50 @@ const scheduleAfterLoadIdle = (callback: () => void) => {
 }
 
 export const getRenderer = () => {
-  if (!rendererInstance) {
-    const canvas = document.createElement('canvas')
-    rendererInstance = new GameRenderer(canvas)
+  if (rendererInstance) return rendererInstance
+  if (rendererInitError) {
+    throw rendererInitError
   }
+
+  const canvas = document.createElement('canvas')
+  try {
+    rendererInstance = new GameRenderer(canvas)
+    rendererInitStatus = { ok: true, profile: rendererInstance.profile }
+    rendererInitError = null
+
+    if (
+      import.meta.env.DEV &&
+      rendererInstance.profile !== 'strict' &&
+      !compatProfileLogged
+    ) {
+      compatProfileLogged = true
+      console.info(
+        `[Renderer] WebGL2 compatibility profile selected: ${rendererInstance.profile}`
+      )
+    }
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error))
+    rendererInitError = err
+    rendererInitStatus = { ok: false, reason: getInitReason(error) }
+
+    if (import.meta.env.DEV && !initFailureLogged) {
+      initFailureLogged = true
+      const details = error instanceof RendererInitError
+        ? {
+            attemptedProfiles: error.attemptedProfiles,
+            webgl2ApiAvailable: error.webgl2ApiAvailable,
+          }
+        : null
+      console.warn('[Renderer] WebGL2 initialization failed.', {
+        reason: rendererInitStatus.reason,
+        details,
+        error: err,
+      })
+    }
+
+    throw err
+  }
+
   return rendererInstance
 }
 
@@ -589,10 +714,22 @@ export const requestRendererCompile = () => {
   compileRequested = true
 
   scheduleAfterLoadIdle(() => {
-    const renderer = getRenderer()
-    renderer.startProgramCompile()
+    try {
+      const renderer = getRenderer()
+      renderer.startProgramCompile()
+    } catch (error) {
+      compileRequested = false
+      if (import.meta.env.DEV) {
+        console.warn(
+          '[Renderer] Skipping async shader precompile because renderer init failed.',
+          error
+        )
+      }
+    }
   })
 }
+
+export const getRendererInitStatus = (): RendererInitStatus => rendererInitStatus
 
 export const disposeRenderer = () => {
   if (rendererInstance) {
@@ -600,4 +737,11 @@ export const disposeRenderer = () => {
     rendererInstance = null
   }
   compileRequested = false
+  rendererInitError = null
+  rendererInitStatus = {
+    ok: false,
+    reason: 'Renderer has not been initialized yet.',
+  }
+  initFailureLogged = false
+  compatProfileLogged = false
 }
