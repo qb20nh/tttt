@@ -151,12 +151,14 @@ export const getNextConstraint = (
   path: number[],
   wonDepth: number
 ): number[] => {
-  if (wonDepth > 0) {
-    // If a board at `wonDepth` was won, player is sent to the relative position in that board.
-    const contextDepth = Math.max(0, wonDepth - 2)
-    const context = path.slice(0, contextDepth)
-    const targetIndex = path[wonDepth - 1]
-    return [...context, targetIndex]
-  }
-  return []
+  if (wonDepth <= 0) return []
+
+  // Ignore outermost override: keep normal relative targeting from the move.
+  const effectiveWonDepth = wonDepth === 1 ? path.length : wonDepth
+
+  // If a board at `effectiveWonDepth` was won, player is sent to the relative position in that board.
+  const contextDepth = Math.max(0, effectiveWonDepth - 2)
+  const context = path.slice(0, contextDepth)
+  const targetIndex = path[effectiveWonDepth - 1]
+  return [...context, targetIndex]
 }

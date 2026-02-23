@@ -221,7 +221,11 @@ export class Search {
 
       // Update Constraint
       const D = board.depth
-      const targetLayer = changedLevel === -1 ? D - 1 : changedLevel - 1
+      // Ignore outermost override and keep regular relative targeting.
+      const ignoreOutermostOverride = changedLevel === 1
+      const targetLayer = (changedLevel === -1 || ignoreOutermostOverride)
+        ? D - 1
+        : changedLevel - 1
 
       if (targetLayer < 0) {
         board.constraint = -1
