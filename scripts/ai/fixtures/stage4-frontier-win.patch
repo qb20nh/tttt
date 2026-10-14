@@ -1,0 +1,65 @@
+diff --git a/src/game/ai/default/search.ts b/src/game/ai/default/search.ts
+index ff6d167..a410b84 100644
+--- a/src/game/ai/default/search.ts
++++ b/src/game/ai/default/search.ts
+@@ -2,7 +2,7 @@ import { Board } from './board'
+ import { getOpeningMoves } from '../symmetry'
+ import { MoveGen } from './movegen'
+ import { CELL_EMPTY, CELL_X, CELL_O } from './constants'
+-import { LUT_WIN_STATUS_BASE4 } from './lookup'
++import { LUT_WIN_STATUS_BASE4, LUT_WIN_MOVES_X, LUT_WIN_MOVES_O } from './lookup'
+ import { LUT_ORDER_KEY_INDEX, LUT_ORDER_RANK, computeOrderRank } from './order-lookup'
+ import { tt } from './transposition'
+ import {
+@@ -222,6 +222,36 @@ export class Search {
+     return true
+   }
+
++  private hasImmediateRootWin (board: Board, player: number): boolean {
++    const wins = player === CELL_X ? LUT_WIN_MOVES_X : LUT_WIN_MOVES_O
++    if (wins[board.keys[0][0]] === 0) return false
++    return this.hasWinningLeaf(board, wins, 0, 0)
++  }
++
++  private hasWinningLeaf (
++    board: Board,
++    wins: Uint16Array,
++    layer: number,
++    nodeIdx: number
++  ): boolean {
++    if (board.getNodeStatus(layer, nodeIdx) !== 0) return false
++    let mask = wins[board.keys[layer][nodeIdx]]
++    if (board.constraint >= 0 && layer < board.constraintLayer) {
++      const scale = board.powers[board.constraintLayer - layer - 1]
++      const required = Math.floor(board.constraint / scale) % 9
++      mask &= 1 << required
++    }
++    if (mask === 0) return false
++    if (layer === board.depth - 1) return true
++    while (mask !== 0) {
++      const bit = mask & -mask
++      const childIdx = nodeIdx * 9 + 31 - Math.clz32(bit)
++      if (this.hasWinningLeaf(board, wins, layer + 1, childIdx)) return true
++      mask ^= bit
++    }
++    return false
++  }
++
+   private playMove (board: Board, move: number, player: number) {
+     const changedLevel = board.setCell(move, player)
+     if (changedLevel === -1 || changedLevel === 1) {
+@@ -263,7 +293,13 @@ export class Search {
+
+     const winner = board.getWinner()
+     if (winner !== 0) return this.terminalScore(winner, player, ply)
+-    if (depth === 0) return board.evaluate(player)
++    if (depth === 0) {
++      // A legal win on the next move reaches the exact theoretical ceiling;
++      // no other reply or continuation can improve this position's value.
++      return this.hasImmediateRootWin(board, player)
++        ? WIN - ply - 1
++        : board.evaluate(player)
++    }
+
+     const constraint = (board.constraint + 1) & 1023
+     const layer = board.constraintLayer + 1

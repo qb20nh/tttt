@@ -3,12 +3,6 @@ import { BoardAdapter } from './default/adapter'
 import type { BoardNode, Player } from '../types'
 import { CELL_X, CELL_O } from './default/constants'
 import { tt } from './default/transposition'
-import {
-  getRandomSymmetry,
-  transformBoard,
-  transformConstraint,
-  inverseTransformPath,
-} from './symmetry'
 import { isValidPath } from '../logic'
 
 type WorkerMessage =
@@ -29,133 +23,94 @@ type WorkerMessage =
   }
   | { type: 'clear' }
 
-// Global Search Instance
 const engine = new Search()
+const MOVE_PREFERENCE = [4, 0, 2, 6, 8, 1, 3, 5, 7]
+
+const toPath = (move: number, depth: number): number[] => {
+  if (!Number.isInteger(move) || move < 0 || move >= Math.pow(9, depth)) return []
+  const path = new Array<number>(depth)
+  for (let i = depth - 1; i >= 0; i--) {
+    path[i] = move % 9
+    move = Math.floor(move / 9)
+  }
+  return path
+}
+
+const isLegalMove = (board: BoardNode, path: number[], constraint: number[], depth: number): boolean => {
+  return path.length === depth &&
+    constraint.every((index, i) => path[i] === index) &&
+    isValidPath(board, path)
+}
+
+// Search failures must still produce a legal move without starting another full
+// search after the original deadline. Traverse the authoritative game tree.
+const findLegalMove = (board: BoardNode, constraint: number[], depth: number): number[] => {
+  const path: number[] = []
+  const visit = (node: BoardNode, layer: number): boolean => {
+    if (node.winner) return false
+    if (layer === depth) return !node.children && node.value === null
+    if (!node.children) return false
+
+    const choices = layer < constraint.length ? [constraint[layer]] : MOVE_PREFERENCE
+    for (const index of choices) {
+      if (!node.children[index]) continue
+      path.push(index)
+      if (visit(node.children[index], layer + 1)) return true
+      path.pop()
+    }
+    return false
+  }
+  return visit(board, 0) ? path : []
+}
 
 self.onmessage = (e: MessageEvent<WorkerMessage>) => {
   const msg = e.data
 
   if (msg.type === 'search') {
-    const { board: boardNode, player, constraint, config, id } = msg // Extract ID
+    const { board: boardNode, player, constraint, config, id } = msg
+    const start = performance.now()
     try {
-      // Apply Random Symmetry
-      const symIdx = getRandomSymmetry()
-
-      // Transform Board & Constraint
-      const transBoard = transformBoard(boardNode, symIdx)
-      const transConstraint = transformConstraint(constraint, symIdx)
-
-      const board = BoardAdapter.toBoard(
-        transBoard,
-        config.boardDepth,
-        transConstraint
-      )
+      // Keep one coordinate system across turns so prior searches remain useful
+      // in the transposition table and no recursive symmetry clone is needed.
+      const board = BoardAdapter.toBoard(boardNode, config.boardDepth, constraint)
       const pVal = player === 'X' ? CELL_X : CELL_O
+      const remainingTime = Math.max(0, config.maxTime - (performance.now() - start))
+      const result = engine.search(board, pVal, config.maxDepth, remainingTime)
+      let path = toPath(result.move, config.boardDepth)
 
-      const result = engine.search(board, pVal, config.maxDepth, config.maxTime)
-
-      // Convert Flat Move to Path
-      const bestPath: number[] = []
-      if (result.move !== -1) {
-        let m = result.move
-        for (let i = 0; i < config.boardDepth; i++) {
-          bestPath.unshift(m % 9)
-          m = Math.floor(m / 9)
+      if (!isLegalMove(boardNode, path, constraint, config.boardDepth)) {
+        if (path.length > 0) {
+          console.error('AI generated an invalid move:', path)
+          tt.clear()
         }
+        path = board.getWinner() === 0
+          ? findLegalMove(boardNode, constraint, config.boardDepth)
+          : []
       }
 
-      // Inverse Transform Path
-      const finalPath = inverseTransformPath(bestPath, symIdx)
-
-      // Safety Validation: Check if the move is actually legal on the ORIGINAL board
-      // We reuse logic from engine (simplified)
-
-      let isValid = true
-      if (finalPath.length === 0) isValid = false
-
-      // Check constraint
-      if (isValid && constraint.length > 0) {
-        // Check if path starts with constraint
-        for (let i = 0; i < constraint.length; i++) {
-          if (finalPath[i] !== constraint[i]) {
-            isValid = false
-            break
-          }
-        }
-      }
-
-      // Check if path is valid (SSOT)
-      if (isValid) {
-        isValid = isValidPath(boardNode, finalPath)
-      }
-
-      if (!isValid) {
-        console.warn(
-          `AI generated invalid move with symmetry ${symIdx}. Path: ${finalPath}. Falling back to Identity Search.`
-        )
-
-        // Fallback: Run Identity Search (no symmetry transform)
-        // Clear TT since symmetry-transformed entries are useless for identity search
-        tt.clear()
-
-        // Use reduced time since we've already spent time on the first search
-        const remainingTime = Math.max(config.maxTime / 2, 1000)
-        const board = BoardAdapter.toBoard(
-          boardNode,
-          config.boardDepth,
-          constraint
-        )
-        const fallbackResult = engine.search(
-          board,
-          pVal,
-          config.maxDepth,
-          remainingTime
-        )
-
-        const bestPath: number[] = []
-        if (fallbackResult.move !== -1) {
-          let m = fallbackResult.move
-          for (let i = 0; i < config.boardDepth; i++) {
-            bestPath.unshift(m % 9)
-            m = Math.floor(m / 9)
-          }
-        }
-        self.postMessage({
-          type: 'result',
-          id, // Echo ID
-          result: {
-            move: bestPath,
-            score: fallbackResult.score,
-            depth: fallbackResult.depth,
-            nodes: result.nodes + fallbackResult.nodes,
-            time: 0,
-          },
-        })
-      } else {
-        self.postMessage({
-          type: 'result',
-          id, // Echo ID
-          result: {
-            move: finalPath,
-            score: result.score,
-            depth: result.depth,
-            nodes: result.nodes,
-            time: 0,
-          },
-        })
-      }
-    } catch (error) {
-      console.error('AI Search Error:', error)
-      // Return empty result to unblock engine
       self.postMessage({
         type: 'result',
-        id, // Echo ID
+        id,
         result: {
-          move: [],
+          move: path,
+          score: result.score,
+          depth: result.depth,
+          nodes: result.nodes,
+          time: performance.now() - start,
+        },
+      })
+    } catch (error) {
+      console.error('AI Search Error:', error)
+      tt.clear()
+      self.postMessage({
+        type: 'result',
+        id,
+        result: {
+          move: findLegalMove(boardNode, constraint, config.boardDepth),
           score: 0,
           depth: 0,
           nodes: 0,
-          time: 0,
+          time: performance.now() - start,
         },
       })
     }
@@ -163,24 +118,18 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
     const { board: boardNode, player, constraint, config } = msg
     try {
       tt.clear()
-
-      const board = BoardAdapter.toBoard(
-        boardNode,
-        config.boardDepth,
-        constraint
-      )
+      const board = BoardAdapter.toBoard(boardNode, config.boardDepth, constraint)
       const pVal = player === 'X' ? CELL_X : CELL_O
 
       const start = performance.now()
       const res = engine.search(board, pVal, config.maxDepth, config.maxTime)
-      const end = performance.now()
-
+      const elapsed = performance.now() - start
       const result = {
         default: {
-          time: end - start,
+          time: elapsed,
           nodes: res.nodes,
-          nps: res.nodes / ((end - start) / 1000) || 0,
-          depth: config.maxDepth,
+          nps: elapsed > 0 ? res.nodes / (elapsed / 1000) : 0,
+          depth: res.depth,
         },
       }
 

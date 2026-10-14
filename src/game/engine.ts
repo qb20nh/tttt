@@ -81,57 +81,6 @@ export const useGameState = (
   const aiStartTimeRef = useRef<number>(0)
   const searchIdRef = useRef<number>(0) // Unique ID for each search request
 
-  useEffect(() => {
-    if (!isPlaying) return // Block AI if on Home Screen
-    if (winner || isAiThinking) return
-
-    let shouldTriggerAI = false
-    if (gameMode === 'PvAI' && currentPlayer === 'O') {
-      shouldTriggerAI = true
-    } else if (gameMode === 'AIvAI') {
-      shouldTriggerAI = true
-    }
-
-    if (shouldTriggerAI) {
-      // eslint-disable-next-line
-      setIsAiThinking(true)
-      aiStartTimeRef.current = performance.now()
-      searchIdRef.current += 1 // Increment ID
-      const currentSearchId = searchIdRef.current
-
-      const searchDepth = getSearchDepth(depth)
-
-      let targetWorker: Worker | null = null
-      if (gameMode === 'PvAI' && currentPlayer === 'O') {
-        targetWorker = workerO.current
-      } else if (gameMode === 'AIvAI') {
-        targetWorker = currentPlayer === 'X' ? workerX.current : workerO.current
-      }
-
-      targetWorker?.postMessage({
-        type: 'search',
-        id: currentSearchId, // Send ID
-        board,
-        player: currentPlayer,
-        constraint: activeConstraint,
-        config: {
-          maxTime: 8500,
-          maxDepth: searchDepth, // Search depth (not board depth)
-          boardDepth: depth, // Actual board depth
-        },
-      })
-    }
-  }, [
-    currentPlayer,
-    winner,
-    board,
-    activeConstraint,
-    gameMode,
-    depth,
-    isAiThinking,
-    isPlaying,
-  ])
-
   const handleMoveInternal = useCallback(
     (
       gridX: number,
@@ -241,15 +190,18 @@ export const useGameState = (
   // --- Worker Management ---
   const terminateWorkers = useCallback(() => {
     releaseAiWorker(workerX.current)
-    releaseAiWorker(workerO.current)
+    if (workerO.current !== workerX.current) releaseAiWorker(workerO.current)
     workerX.current = null
     workerO.current = null
   }, [])
 
   const initializeWorkers = useCallback(() => {
     terminateWorkers()
-    workerX.current = acquireAiWorker()
-    workerO.current = acquireAiWorker()
+    // Turns are sequential, so both players can share one engine and its
+    // transposition table instead of retaining a second idle worker.
+    const worker = acquireAiWorker()
+    workerX.current = worker
+    workerO.current = worker
 
     const handleWorkerMessage = async (e: MessageEvent) => {
       const { type, result, id } = e.data
@@ -324,17 +276,67 @@ export const useGameState = (
       }
     }
 
-    if (workerX.current) workerX.current.onmessage = handleWorkerMessage
-    if (workerO.current) workerO.current.onmessage = handleWorkerMessage
+    if (worker) worker.onmessage = handleWorkerMessage
   }, [handleMoveInternal, applyMove, terminateWorkers])
 
-  // Lifecycle: Init on mount, Terminate on unmount
+  // Lifecycle: Acquire on mount, release on unmount
   useEffect(() => {
     initializeWorkers()
     return () => terminateWorkers()
   }, [initializeWorkers, terminateWorkers])
 
-  // Lifecycle: Terminate when Game Over (Prompt Memory Release)
+  useEffect(() => {
+    if (!isPlaying) return // Block AI if on Home Screen
+    if (winner || isAiThinking) return
+
+    let shouldTriggerAI = false
+    if (gameMode === 'PvAI' && currentPlayer === 'O') {
+      shouldTriggerAI = true
+    } else if (gameMode === 'AIvAI') {
+      shouldTriggerAI = true
+    }
+
+    if (shouldTriggerAI) {
+      // eslint-disable-next-line
+      setIsAiThinking(true)
+      aiStartTimeRef.current = performance.now()
+      searchIdRef.current += 1 // Increment ID
+      const currentSearchId = searchIdRef.current
+
+      const searchDepth = getSearchDepth(depth)
+
+      let targetWorker: Worker | null = null
+      if (gameMode === 'PvAI' && currentPlayer === 'O') {
+        targetWorker = workerO.current
+      } else if (gameMode === 'AIvAI') {
+        targetWorker = currentPlayer === 'X' ? workerX.current : workerO.current
+      }
+
+      targetWorker?.postMessage({
+        type: 'search',
+        id: currentSearchId, // Send ID
+        board,
+        player: currentPlayer,
+        constraint: activeConstraint,
+        config: {
+          maxTime: 8500,
+          maxDepth: searchDepth, // Search depth (not board depth)
+          boardDepth: depth, // Actual board depth
+        },
+      })
+    }
+  }, [
+    currentPlayer,
+    winner,
+    board,
+    activeConstraint,
+    gameMode,
+    depth,
+    isAiThinking,
+    isPlaying,
+  ])
+
+  // Lifecycle: Release worker ownership when the game ends
   useEffect(() => {
     if (winner) {
       terminateWorkers()

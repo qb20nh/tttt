@@ -14,8 +14,9 @@ export const WIN_PATTERNS = [
 
 // AI search depth based on board depth (Single Source of Truth)
 export const getSearchDepth = (boardDepth: number): number => {
-  if (boardDepth === 4) return 12
-  return 14
+  // Time and proven outcomes stop search; allow fast positions to use the
+  // full thinking budget instead of stopping at an arbitrary shallow ceiling.
+  return boardDepth === 1 ? 9 : 64
 }
 
 // --- Constants for Layout ---

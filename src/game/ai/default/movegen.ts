@@ -1,93 +1,77 @@
 import { Board } from './board'
-import { CELL_EMPTY } from './constants'
-import { LUT_WIN_STATUS_BASE4 } from './lookup'
+import { LUT_EMPTY_MASK_BASE4 } from './lookup'
+
+const POPCOUNT = new Uint8Array(512)
+for (let mask = 1; mask < POPCOUNT.length; mask++) POPCOUNT[mask] = POPCOUNT[mask >>> 1] + (mask & 1)
 
 export class MoveGen {
-  static generate (board: Board, outArray: Int32Array, offset: number): number {
+  // A search horizon needs only this capped global count, irrespective of the
+  // current target. Avoid materializing thousands of moves to compute a bound.
+  static countGlobal (board: Board, limit: number): number {
+    if (limit <= 0 || board.getWinner() !== 0) return 0
+    return MoveGen.countNode(board, 0, 0, limit)
+  }
+
+  private static countNode (board: Board, layer: number, nodeIdx: number, limit: number): number {
+    if (board.getNodeStatus(layer, nodeIdx) !== 0) return 0
+    let mask = LUT_EMPTY_MASK_BASE4[board.keys[layer][nodeIdx]]
+    if (layer === board.depth - 1) return Math.min(limit, POPCOUNT[mask])
     let count = 0
-    const D = board.depth
-
-    // 1. Determine Search Range
-    let rangeStart = 0
-    let rangeEnd = board.leaves.length // Exclusive
-
-    const constraint = board.constraint
-    const constraintLayer = board.constraintLayer
-
-    let validSubboard = false
-
-    if (constraint !== -1) {
-      // Check if constrained target is playable
-      // The constraint is at 'constraintLayer'.
-      // The constraint index is into keys[constraintLayer].
-      if (!MoveGen.isNodeFullOrWon(board, constraintLayer, constraint)) {
-        validSubboard = true
-
-        // Calculate Leaf Range covered by this constraint
-        const power = D - 1 - constraintLayer
-        // Scale = 9^(D - 1 - constraintLayer)
-        let scale = 1
-        for (let k = 0; k < power; k++) scale *= 9
-
-        // Start Index of Leaf Parent
-        const leafParentStart = constraint * scale
-        // End Index
-        const leafParentEnd = leafParentStart + scale
-
-        // Leaf Indices range:
-        rangeStart = leafParentStart * 9
-        rangeEnd = leafParentEnd * 9
-      }
+    while (mask !== 0 && count < limit) {
+      const bit = mask & -mask
+      count += MoveGen.countNode(board, layer + 1, nodeIdx * 9 + 31 - Math.clz32(bit), limit - count)
+      mask ^= bit
     }
-
-    // 2. Iterate and Collect
-    for (let i = rangeStart; i < rangeEnd; i++) {
-      // Check if leaf is empty
-      if (board.leaves[i] === CELL_EMPTY) {
-        // If Global Search (or Constraint Invalidated), we must check ancestry playability.
-        // Validate ancestry from Leaf Parent up to Constraint Layer (exclusive).
-        const checkLimit = validSubboard ? constraintLayer + 1 : 0
-
-        let ancestorIdx = i
-        let skipTo = -1
-
-        for (let layer = D - 1; layer >= checkLimit; layer--) {
-          ancestorIdx = (ancestorIdx / 9) >>> 0
-          if (MoveGen.isNodeFullOrWon(board, layer, ancestorIdx)) {
-            // Skip all leaves under this won/full ancestor
-            const power = D - layer
-            let skipSize = 1
-            for (let k = 0; k < power; k++) skipSize *= 9
-
-            // Calculate last leaf index to skip to
-            // skipTo = (ancestorIdx + 1) * 9^(power) - 1
-
-            skipTo = (ancestorIdx + 1) * skipSize - 1
-            break
-          }
-        }
-
-        if (skipTo !== -1) {
-          i = skipTo
-          continue
-        }
-
-        outArray[offset + count] = i
-        count++
-      }
-    }
-
     return count
   }
 
-  // Check if node at specific layer/index is won/full
-  static isNodeFullOrWon (
+  static generate (board: Board, outArray: Int32Array, offset: number): number {
+    if (board.getWinner() !== 0) return 0
+
+    let layer = board.constraintLayer
+    let nodeIdx = board.constraint
+    if (nodeIdx >= 0) {
+      // Widen one ancestor at a time, as the game engine does. A won
+      // ancestor can invalidate a target whose own cells are still open.
+      while (layer >= 0 && !board.isPlayableNode(layer, nodeIdx)) {
+        nodeIdx = (nodeIdx / 9) >>> 0
+        layer--
+      }
+    } else layer = -1
+
+    return MoveGen.generateNode(board, layer < 0 ? 0 : layer, layer < 0 ? 0 : nodeIdx, outArray, offset)
+  }
+
+  private static generateNode (
     board: Board,
     layer: number,
-    nodeIdx: number
-  ): boolean {
+    nodeIdx: number,
+    outArray: Int32Array,
+    offset: number
+  ): number {
     const key = board.keys[layer][nodeIdx]
-    const status = LUT_WIN_STATUS_BASE4[key]
-    return status !== 0 // 0=Playing
+    if (board.getNodeStatus(layer, nodeIdx) !== 0) return 0
+    let mask = LUT_EMPTY_MASK_BASE4[key]
+    const firstChild = nodeIdx * 9
+    let count = 0
+    if (layer === board.depth - 1) {
+      while (mask !== 0) {
+        const bit = mask & -mask
+        outArray[offset + count++] = firstChild + 31 - Math.clz32(bit)
+        mask ^= bit
+      }
+    } else {
+      while (mask !== 0) {
+        const bit = mask & -mask
+        count += MoveGen.generateNode(board, layer + 1, firstChild + 31 - Math.clz32(bit), outArray, offset + count)
+        mask ^= bit
+      }
+    }
+    return count
+  }
+
+  static isNodeFullOrWon (board: Board, layer: number, nodeIdx: number): boolean {
+    if (layer < 0 || layer >= board.depth || nodeIdx < 0 || nodeIdx >= board.keys[layer].length) return true
+    return board.getNodeStatus(layer, nodeIdx) !== 0
   }
 }
