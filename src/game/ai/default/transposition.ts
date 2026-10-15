@@ -7,28 +7,23 @@ export interface TTEntry {
   bestMove: number
 }
 
-// 2M entries = 32MB RAM per Worker (16MB Keys + 16MB Values)
+// 34 MiB per worker: full 64-bit identities, packed results and replacement age.
 const TABLE_SIZE = 2 * 1024 * 1024
 
 export class TT {
-  // Key: Full Zobrist Hash
-  keys: BigUint64Array
-
-  // Value: Packed Data
-  // [i*2 + 0]: Score (Int32)
-  // [i*2 + 1]: Packed (Int32) -> [Move: 16 | Depth: 8 | Flag: 2]
+  keys: Uint32Array
   values: Int32Array
-
-  mask: bigint
+  generations: Uint8Array
+  mask: number
+  generation = 1
 
   constructor (size = TABLE_SIZE) {
-    // Ensure power of 2
     let realSize = 1
     while (realSize < size) realSize *= 2
-
-    this.keys = new BigUint64Array(realSize)
+    this.keys = new Uint32Array(realSize * 2)
     this.values = new Int32Array(realSize * 2)
-    this.mask = BigInt(realSize - 1)
+    this.generations = new Uint8Array(realSize)
+    this.mask = realSize - 1
   }
 
   put (
@@ -38,82 +33,77 @@ export class TT {
     flag: TTFlag,
     bestMove: number
   ) {
-    const index = Number(hash & this.mask)
+    this.putParts(Number(hash & 0xffffffffn), Number(hash >> 32n), depth, score, flag, bestMove)
+  }
 
-    // Replacement Strategy:
-    // If current entry is empty (key=0), replace.
-    // If exact hash match (update), replace.
-    // If new result has deeper search, replace.
-    // Else, keep existing (Depth-Preferred).
-
-    const existingKey = this.keys[index]
-
-    if (existingKey !== 0n) {
-      // Check depth for both Collision and Same-Key updates
-      const existingPacked = this.values[index * 2 + 1]
-      const existingDepth = (existingPacked >> 2) & 0xff
-
-      // If new depth is lower, keep the existing deeper result
-      if (depth < existingDepth) {
-        return
-      }
-
-      // If depths are equal, we generally overwrite (prefer new)
-      // But for collisions, some engines prefer to keep old.
-      // Here we simply overwrite if depth >= existing.
+  putParts (
+    low: number,
+    high: number,
+    depth: number,
+    score: number,
+    flag: TTFlag,
+    bestMove: number
+  ) {
+    const index = low & this.mask
+    const slot = index * 2
+    if (this.generations[index] === this.generation) {
+      const existingDepth = (this.values[slot + 1] >>> 2) & 0xff
+      if (depth < existingDepth) return
+      // An exact entry at this depth is more useful than a later bound.
+      if (depth === existingDepth && (this.values[slot + 1] & 3) === 0 && flag !== 'exact' &&
+        this.keys[slot] === (low >>> 0) && this.keys[slot + 1] === (high >>> 0)) return
     }
-
-    // Write
-    this.keys[index] = hash
-    this.values[index * 2] = score
-
-    let flagVal = 0
-    if (flag === 'lower') flagVal = 1
-    else if (flag === 'upper') flagVal = 2
-
-    // Move: 16 bits (0-65535)
-    // Depth: 8 bits (0-255)
-    // Flag: 2 bits (0-3)
-    // Layout: [Move << 10] | [Depth << 2] | [Flag]
-
-    // Safety clamp
-    const safeMove = bestMove === -1 ? 65535 : bestMove
-
-    const packed = (safeMove << 10) | (depth << 2) | flagVal
-    this.values[index * 2 + 1] = packed
+    this.keys[slot] = low
+    this.keys[slot + 1] = high
+    this.generations[index] = this.generation
+    this.values[slot] = score
+    const flagValue = flag === 'lower' ? 1 : flag === 'upper' ? 2 : 0
+    this.values[slot + 1] = ((bestMove === -1 ? 65535 : bestMove) << 10) | (depth << 2) | flagValue
   }
 
   get (hash: bigint): TTEntry | undefined {
-    const index = Number(hash & this.mask)
-
-    // Check Key
-    if (this.keys[index] !== hash) return undefined
-
-    const score = this.values[index * 2]
+    const index = this.getIndex(hash)
+    if (index === -1) return undefined
     const packed = this.values[index * 2 + 1]
+    const rawMove = (packed >>> 10) & 0xffff
+    const flag = packed & 3
+    return {
+      depth: (packed >>> 2) & 0xff,
+      score: this.values[index * 2],
+      flag: flag === 1 ? 'lower' : flag === 2 ? 'upper' : 'exact',
+      bestMove: rawMove === 65535 ? -1 : rawMove,
+    }
+  }
 
-    const flagVal = packed & 3
-    const depth = (packed >> 2) & 0xff
-    const moveRaw = (packed >> 10) & 0xffff
+  getIndex (hash: bigint): number {
+    return this.getIndexParts(Number(hash & 0xffffffffn), Number(hash >> 32n))
+  }
 
-    // Restore move
-    const bestMove = moveRaw === 65535 ? -1 : moveRaw
+  getIndexParts (low: number, high: number): number {
+    const index = low & this.mask
+    const slot = index * 2
+    return this.generations[index] !== 0 && this.keys[slot] === (low >>> 0) &&
+      this.keys[slot + 1] === (high >>> 0)
+      ? index
+      : -1
+  }
 
-    let flag: TTFlag = 'exact'
-    if (flagVal === 1) flag = 'lower'
-    else if (flagVal === 2) flag = 'upper'
-
-    return { depth, score, flag, bestMove }
+  newSearch () {
+    this.generation++
+    if (this.generation > 255) {
+      this.generations.fill(0)
+      this.generation = 1
+    }
   }
 
   clear () {
-    this.keys.fill(0n)
-    this.values.fill(0)
+    // Occupancy is independent of the key, including the valid all-zero hash.
+    this.generations.fill(0)
+    this.generation = 1
   }
 
   size () {
-    // Approximate count? Or just capacity?
-    return this.keys.length
+    return this.generations.length
   }
 }
 

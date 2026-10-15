@@ -1,0 +1,229 @@
+diff --git a/src/game/ai/default/lookup.ts b/src/game/ai/default/lookup.ts
+index 0372c00..9e13c85 100644
+--- a/src/game/ai/default/lookup.ts
++++ b/src/game/ai/default/lookup.ts
+@@ -30,7 +30,10 @@ export function initTables () {
+   if (initialized) return
+
+   const patterns = WIN_PATTERNS.map(([a, b, c]) => (1 << a) | (1 << b) | (1 << c))
+-  const cells = new Int8Array(9)
++  const popcount = new Uint8Array(512)
++  for (let mask = 1; mask < popcount.length; mask++) popcount[mask] = popcount[mask >>> 1] + (mask & 1)
++  const centerMask = 1 << 4
++  const cornerMask = (1 << 0) | (1 << 2) | (1 << 6) | (1 << 8)
+
+   for (let key = 0; key < KEY_COUNT; key++) {
+     let empty = 0
+@@ -39,7 +42,6 @@ export function initTables () {
+     let drawn = 0
+     for (let j = 0; j < 9; j++) {
+       const val = (key >>> (j * 2)) & 3
+-      cells[j] = val
+       if (val === CELL_EMPTY) empty |= 1 << j
+       else if (val === CELL_X) x |= 1 << j
+       else if (val === CELL_O) o |= 1 << j
+@@ -67,15 +69,11 @@ export function initTables () {
+     if (winner === CELL_X) score = SCORE_WIN
+     else if (winner === CELL_O) score = -SCORE_WIN
+     else if (winner === CELL_EMPTY) {
+-      for (const [a, b, c] of WIN_PATTERNS) {
+-        const va = cells[a]
+-        const vb = cells[b]
+-        const vc = cells[c]
++      for (const pattern of patterns) {
+         // A drawn child blocks the line for both players.
+-        if (va === CELL_DRAW || vb === CELL_DRAW || vc === CELL_DRAW) continue
+-        const cx = Number(va === CELL_X) + Number(vb === CELL_X) + Number(vc === CELL_X)
+-        const co = Number(va === CELL_O) + Number(vb === CELL_O) + Number(vc === CELL_O)
+-        const pattern = (1 << a) | (1 << b) | (1 << c)
++        if (drawn & pattern) continue
++        const cx = popcount[x & pattern]
++        const co = popcount[o & pattern]
+         if (co === 0) {
+           if (cx === 2) {
+             score += SCORE_NEAR_X
+@@ -90,12 +88,9 @@ export function initTables () {
+         }
+       }
+
+-      if (cells[4] === CELL_X) score += 5
+-      else if (cells[4] === CELL_O) score -= 5
+-      for (const idx of [0, 2, 6, 8]) {
+-        if (cells[idx] === CELL_X) score += 2
+-        else if (cells[idx] === CELL_O) score -= 2
+-      }
++      if (x & centerMask) score += 5
++      else if (o & centerMask) score -= 5
++      score += 2 * (popcount[x & cornerMask] - popcount[o & cornerMask])
+     }
+     LUT_WIN_MOVES_X[key] = xWins
+     LUT_WIN_MOVES_O[key] = oWins
+diff --git a/src/game/ai/default/order-lookup.ts b/src/game/ai/default/order-lookup.ts
+new file mode 100644
+index 0000000..32dd407
+--- /dev/null
++++ b/src/game/ai/default/order-lookup.ts
+@@ -0,0 +1,44 @@
++import {
++  initTables,
++  LUT_WIN_STATUS_BASE4,
++  LUT_SCORE_BASE4,
++  LUT_WIN_MOVES_X,
++  LUT_WIN_MOVES_O,
++} from './lookup'
++
++initTables()
++
++// Store only the 3^9 ordinary boards; imported Draw cells use the exact fallback.
++export const LUT_ORDER_KEY_INDEX = new Uint16Array(1 << 18).fill(65535)
++export const LUT_ORDER_RANK = new Uint16Array(19683 * 9)
++
++// Input is normalized to X: empty and Draw markers retain their identities.
++// The high bit records a local win; the low 15 bits contain the static score.
++export function computeOrderRank (key: number, relative: number): number {
++  const bit = 1 << relative
++  const nextKey = key | (1 << (relative * 2))
++  const localWin = (LUT_WIN_MOVES_X[key] & bit) !== 0
++  let score = 2000
++  if (localWin) score += 8000
++  if (LUT_WIN_MOVES_O[key] & bit) score += 4000
++  if (LUT_WIN_STATUS_BASE4[nextKey] === 3) score += 50
++  const delta = LUT_SCORE_BASE4[nextKey] - LUT_SCORE_BASE4[key]
++  score += Math.max(-200, Math.min(200, delta))
++  if (relative === 4) score += 30
++  else if ((relative & 1) === 0) score += 12
++  return score | (localWin ? 0x8000 : 0)
++}
++
++for (let index = 0; index < 19683; index++) {
++  let value = index
++  let key = 0
++  for (let relative = 0; relative < 9; relative++) {
++    key |= (value % 3) << (relative * 2)
++    value = (value / 3) >>> 0
++  }
++  LUT_ORDER_KEY_INDEX[key] = index
++  for (let relative = 0; relative < 9; relative++) {
++    if (((key >>> (relative * 2)) & 3) !== 0) continue
++    LUT_ORDER_RANK[index * 9 + relative] = computeOrderRank(key, relative)
++  }
++}
+diff --git a/src/game/ai/default/search.ts b/src/game/ai/default/search.ts
+index 35b811e..a410b84 100644
+--- a/src/game/ai/default/search.ts
++++ b/src/game/ai/default/search.ts
+@@ -2,12 +2,8 @@ import { Board } from './board'
+ import { getOpeningMoves } from '../symmetry'
+ import { MoveGen } from './movegen'
+ import { CELL_EMPTY, CELL_X, CELL_O } from './constants'
+-import {
+-  LUT_WIN_STATUS_BASE4,
+-  LUT_SCORE_BASE4,
+-  LUT_WIN_MOVES_X,
+-  LUT_WIN_MOVES_O,
+-} from './lookup'
++import { LUT_WIN_STATUS_BASE4, LUT_WIN_MOVES_X, LUT_WIN_MOVES_O } from './lookup'
++import { LUT_ORDER_KEY_INDEX, LUT_ORDER_RANK, computeOrderRank } from './order-lookup'
+ import { tt } from './transposition'
+ import {
+   ZOBRIST_SIDE_LOW, ZOBRIST_SIDE_HIGH,
+@@ -185,24 +181,23 @@ export class Search {
+   ) {
+     if (count === 1) return
+     const layer = board.keys[board.depth - 1]
+-    const wins = player === CELL_X ? LUT_WIN_MOVES_X : LUT_WIN_MOVES_O
+-    const blocks = player === CELL_X ? LUT_WIN_MOVES_O : LUT_WIN_MOVES_X
++    let lastKey = -1
++    let colorKey = 0
++    let rankOffset = 0
+     const historyOffset = (player - 1) * 6561
+     for (let i = 0; i < count; i++) {
+       const move = this.moves[offset + i]
+       const relative = move % 9
+       const key = layer[(move / 9) >>> 0]
+-      const bit = 1 << relative
+-      const nextKey = key | (player << (relative * 2))
+-      let score = 2000
+-      const localWin = (wins[key] & bit) !== 0
+-      if (localWin) score += 8000
+-      if (blocks[key] & bit) score += 4000
+-      if (LUT_WIN_STATUS_BASE4[nextKey] === 3) score += 50
+-      const delta = (LUT_SCORE_BASE4[nextKey] - LUT_SCORE_BASE4[key]) * (player === CELL_X ? 1 : -1)
+-      score += Math.max(-200, Math.min(200, delta))
+-      if (relative === 4) score += 30
+-      else if ((relative & 1) === 0) score += 12
++      if (key !== lastKey) {
++        lastKey = key
++        colorKey = player === CELL_X ? key : ((key & 0x15555) << 1) | ((key & 0x2aaaa) >>> 1)
++        const index = LUT_ORDER_KEY_INDEX[colorKey]
++        rankOffset = index === 65535 ? -1 : index * 9
++      }
++      const rank = rankOffset === -1 ? computeOrderRank(colorKey, relative) : LUT_ORDER_RANK[rankOffset + relative]
++      let score = rank & 0x7fff
++      const localWin = (rank & 0x8000) !== 0
+       score += Math.min(512, this.history[historyOffset + move] >>> 3)
+       if (move === this.killers[ply * 2]) score += 700
+       else if (move === this.killers[ply * 2 + 1]) score += 600
+@@ -227,9 +222,46 @@ export class Search {
+     return true
+   }
+
++  private hasImmediateRootWin (board: Board, player: number): boolean {
++    const wins = player === CELL_X ? LUT_WIN_MOVES_X : LUT_WIN_MOVES_O
++    if (wins[board.keys[0][0]] === 0) return false
++    return this.hasWinningLeaf(board, wins, 0, 0)
++  }
++
++  private hasWinningLeaf (
++    board: Board,
++    wins: Uint16Array,
++    layer: number,
++    nodeIdx: number
++  ): boolean {
++    if (board.getNodeStatus(layer, nodeIdx) !== 0) return false
++    let mask = wins[board.keys[layer][nodeIdx]]
++    if (board.constraint >= 0 && layer < board.constraintLayer) {
++      const scale = board.powers[board.constraintLayer - layer - 1]
++      const required = Math.floor(board.constraint / scale) % 9
++      mask &= 1 << required
++    }
++    if (mask === 0) return false
++    if (layer === board.depth - 1) return true
++    while (mask !== 0) {
++      const bit = mask & -mask
++      const childIdx = nodeIdx * 9 + 31 - Math.clz32(bit)
++      if (this.hasWinningLeaf(board, wins, layer + 1, childIdx)) return true
++      mask ^= bit
++    }
++    return false
++  }
++
+   private playMove (board: Board, move: number, player: number) {
+     const changedLevel = board.setCell(move, player)
+-    const targetLayer = changedLevel === -1 || changedLevel === 1 ? board.depth - 1 : changedLevel - 1
++    if (changedLevel === -1 || changedLevel === 1) {
++      // The common leaf-routing case has a constant scale of one.
++      board.constraint = ((move / 81) >>> 0) * 9 + move % 9
++      board.constraintLayer = board.depth - 1
++      board.normalizeConstraint()
++      return
++    }
++    const targetLayer = changedLevel - 1
+     if (targetLayer < 0) {
+       board.constraint = -1
+       board.constraintLayer = -1
+@@ -261,7 +293,13 @@ export class Search {
+
+     const winner = board.getWinner()
+     if (winner !== 0) return this.terminalScore(winner, player, ply)
+-    if (depth === 0) return board.evaluate(player)
++    if (depth === 0) {
++      // A legal win on the next move reaches the exact theoretical ceiling;
++      // no other reply or continuation can improve this position's value.
++      return this.hasImmediateRootWin(board, player)
++        ? WIN - ply - 1
++        : board.evaluate(player)
++    }
+
+     const constraint = (board.constraint + 1) & 1023
+     const layer = board.constraintLayer + 1

@@ -1,6 +1,25 @@
-import type { BoardNode } from '../../types'
+import type { BoardNode, Winner } from '../../types'
 import { Board } from './board'
 import { CELL_EMPTY, CELL_X, CELL_O, CELL_DRAW } from './constants'
+import { LUT_WIN_STATUS_BASE4 } from './lookup'
+import { ZOBRIST_TABLE_LOW, ZOBRIST_TABLE_HIGH } from './zobrist'
+
+const cellValue = (value: Winner): number => {
+  if (value === 'X') return CELL_X
+  if (value === 'O') return CELL_O
+  if (value === 'Draw') return CELL_DRAW
+  return CELL_EMPTY
+}
+
+// Explicit closures can contain empty descendants (for example an early draw).
+// Give those statuses their own hash component; leaf hashes alone lose them.
+const closureHash = (layer: number, index: number, status: number): bigint => {
+  let hash = (BigInt(layer + 1) << 32n) | (BigInt(index) << 2n) | BigInt(status)
+  hash = BigInt.asUintN(64, hash + 0x9e3779b97f4a7c15n)
+  hash = BigInt.asUintN(64, (hash ^ (hash >> 30n)) * 0xbf58476d1ce4e5b9n)
+  hash = BigInt.asUintN(64, (hash ^ (hash >> 27n)) * 0x94d049bb133111ebn)
+  return hash ^ (hash >> 31n)
+}
 
 export class BoardAdapter {
   static toBoard (
@@ -10,117 +29,50 @@ export class BoardAdapter {
   ): Board {
     const board = new Board(depth)
 
-    // 1. Fill Leaves
-    const traverse = (
-      node: BoardNode,
-      currentDepth: number,
-      globalIdx: number
-    ) => {
-      if (currentDepth === depth) {
-        // Leaf
-        let val = CELL_EMPTY
-        if (node.value === 'X') val = CELL_X
-        else if (node.value === 'O') val = CELL_O
-
-        if (val !== CELL_EMPTY) {
-          board.setCell(globalIdx, val)
+    // Build each hierarchy key once, after its descendants. Replaying occupied
+    // leaves via setCell repeatedly updates the same ancestors and cannot carry
+    // authoritative closures into their grandparents.
+    const traverse = (node: BoardNode, layer: number, index: number): number => {
+      if (layer === depth) {
+        const value = cellValue(node.winner || node.value)
+        board.leaves[index] = value
+        if (value !== CELL_EMPTY) {
+          board.hashLow ^= ZOBRIST_TABLE_LOW[index * 4 + value]
+          board.hashHigh ^= ZOBRIST_TABLE_HIGH[index * 4 + value]
         }
-        return
+        return value
       }
 
+      let key = 0
       if (node.children) {
-        const scale = Math.pow(9, depth - 1 - currentDepth)
         for (let i = 0; i < 9; i++) {
-          traverse(node.children[i], currentDepth + 1, globalIdx + i * scale)
+          key |= traverse(node.children[i], layer + 1, index * 9 + i) << (i * 2)
         }
       }
+      board.keys[layer][index] = key
+
+      const derivedStatus = LUT_WIN_STATUS_BASE4[key]
+      const explicitStatus = cellValue(node.winner)
+      if (explicitStatus !== CELL_EMPTY && explicitStatus !== derivedStatus) {
+        board.hash ^= closureHash(layer, index, explicitStatus)
+      }
+      return explicitStatus || derivedStatus
     }
 
     traverse(root, 0, 0)
+    board.rootWinner = cellValue(root.winner)
+    board.rebuildEvaluation()
 
-    // 1.5 Sync Node States (Winner/Draw)
-    // Engine might flag nodes as 'Draw' (Early Stalemate) even if not full.
-    // We must sync these states to the Board instance so AI respects them.
-
-    const syncWinners = (
-      node: BoardNode,
-      currentDepth: number,
-      globalIdx: number
-    ) => {
-      // We only care about non-leaf nodes here, as leaves are set via setCell.
-      // But if a leaf is 'Draw', setCell might not handle it if logic differs.
-      // Actually, for consistency, let's enforce all known winners.
-
-      if (node.winner) {
-        // Convert winner to int
-        let winVal = CELL_EMPTY // Should not be empty if winner is set
-        if (node.winner === 'X') winVal = CELL_X
-        else if (node.winner === 'O') winVal = CELL_O
-        else if (node.winner === 'Draw') winVal = CELL_DRAW
-
-        if (winVal !== CELL_EMPTY) {
-          // We need to Find the index in the hierarchy.
-          // The 'keys' array stores state for each layer.
-          // Layer 0 = Root.
-          // Layer D-1 = Leaf Parents.
-
-          // Calculate index at this depth
-          const layerIdx = Math.floor(
-            globalIdx / Math.pow(9, depth - currentDepth)
-          )
-
-          // We enforce the state by updating the parent's key for this node.
-          // board.keys[currentDepth] stores the key representing children of nodes at this depth.
-          // But to set the status of a node at `currentDepth`, we must update the key at `currentDepth-1` (Parent Layer).
-
-          if (currentDepth > 0) {
-            const pLayer = currentDepth - 1
-            const pIdx = Math.floor(layerIdx / 9)
-            const childOffset = layerIdx % 9
-
-            const oldKey = board.keys[pLayer][pIdx]
-            const shift = childOffset * 2
-
-            // Clear old 2 bits and set new status
-            const mask = ~(3 << shift)
-            const cleanKey = oldKey & mask
-            const newKey = cleanKey | (winVal << shift)
-
-            board.keys[pLayer][pIdx] = newKey
-          }
-          // Note: If currentDepth is 0 (Root), we cannot update a parent key.
-          // However, if Root is drawn/won, the game is effectively over for search purposes.
-        }
-      } else {
-        // Determine scale for recursion
-        if (node.children) {
-          const scale = Math.pow(9, depth - 1 - currentDepth)
-          for (let i = 0; i < 9; i++) {
-            syncWinners(
-              node.children[i],
-              currentDepth + 1,
-              globalIdx + i * scale
-            )
-          }
-        }
-      }
-    }
-
-    syncWinners(root, 0, 0)
-
-    // 2. Set Constraint
-    if (activeConstraint.length === 0) {
+    if (activeConstraint.length > 0) {
+      let constraint = 0
+      for (const index of activeConstraint) constraint = constraint * 9 + index
+      board.constraint = constraint
+      board.constraintLayer = activeConstraint.length
+    } else {
       board.constraint = -1
       board.constraintLayer = -1
-    } else {
-      let constraintIdx = 0
-      for (let i = 0; i < activeConstraint.length; i++) {
-        constraintIdx = constraintIdx * 9 + activeConstraint[i]
-      }
-
-      board.constraint = constraintIdx
-      board.constraintLayer = activeConstraint.length
     }
+    board.normalizeConstraint()
 
     return board
   }

@@ -8,6 +8,9 @@
     "lint": "eslint .",
     "format": "eslint --fix .",
     "preview": "astro preview",
+    "ai:validate": "node scripts/ai/validate.mjs && node scripts/ai/integration.mjs",
+    "ai:benchmark": "node scripts/ai/benchmark.mjs",
+    "ai:selfplay": "node scripts/ai/selfplay.mjs",
     "preinstall": "npx only-allow pnpm",
     "prepare": "husky"
   },

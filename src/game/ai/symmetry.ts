@@ -123,3 +123,32 @@ export function transformConstraint (
 ): number[] {
   return transformPath(constraint, symIdx)
 }
+
+const OPENING_MOVES = new Map<number, Int32Array>()
+
+// The same square symmetry must act at every hierarchy level to preserve
+// relative routing. One representative suffices only on an empty free root.
+export function getOpeningMoves (depth: number): Int32Array {
+  const cached = OPENING_MOVES.get(depth)
+  if (cached) return cached
+  const moves = new Int32Array(9 ** depth)
+  let count = 0
+  for (let move = 0; move < moves.length; move++) {
+    let representative = true
+    for (let symmetry = 1; symmetry < SYMMETRIES.length && representative; symmetry++) {
+      let source = move
+      let target = 0
+      let scale = 1
+      for (let layer = 0; layer < depth; layer++) {
+        target += SYMMETRIES[symmetry][source % 9] * scale
+        source = Math.floor(source / 9)
+        scale *= 9
+      }
+      if (target > move) representative = false
+    }
+    if (representative) moves[count++] = move
+  }
+  const representatives = moves.slice(0, count)
+  OPENING_MOVES.set(depth, representatives)
+  return representatives
+}
